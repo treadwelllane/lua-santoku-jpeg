@@ -321,12 +321,8 @@ int mt_scale (lua_State *L) {
     pull_data(&decomp, i_pull_data);
 
   jpeg_finish_compress(&comp.comp);
-
   jpeg_destroy_compress(&comp.comp);
-  my_term_destination(&comp.comp);
-
   jpeg_destroy_decompress(&decomp.decomp);
-  my_term_source(&decomp.decomp);
 
   lua_pushboolean(L, 1);
   return 1;

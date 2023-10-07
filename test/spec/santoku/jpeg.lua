@@ -39,10 +39,8 @@ test("jpeg", function ()
         local next_pos = input_pos + chunk_size
         local out = input:sub(input_pos, next_pos)
         input_pos = next_pos + 1
-        print("pull data", input_pos, #out)
         return out, #out
       end, function (data, len)
-        print("push_data", len)
         output:append(data)
       end, 1, 8, 35, 2500)
 
