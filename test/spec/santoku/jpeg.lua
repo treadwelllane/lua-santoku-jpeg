@@ -44,7 +44,6 @@ test("jpeg", function ()
         output:append(data)
       end, 1, 8, 35, 2500)
 
-      print(ok, err)
       assert(ok, err)
 
       output = output:concat()

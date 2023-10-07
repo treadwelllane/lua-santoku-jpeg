@@ -3,8 +3,17 @@
 - Basic README
 - Documentation
 
-- Rework api to function with async pull
-- Bind incremental compress/decompress with
-  scaling, cropping, etc.
+- Async/generator based API
+    - Async input chunk generator passed in
+    - Async output chunk generator returned
 
-- Tests for emscripten and standard
+- Options object instead of position args
+    - Scaling options
+        - width or height, or
+        - scale_num and scale_denom
+    - Cropping options
+        - x, y
+        - width, height
+
+- Test cases for emscripten and standard
+- Install logic
