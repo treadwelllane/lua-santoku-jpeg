@@ -3,9 +3,9 @@
 - Basic README
 - Documentation
 
-- Async/generator based API
-    - Async input chunk generator passed in
-    - Async output chunk generator returned
+- Figure out install logic
+    - Flag for download/install libjpeg that is
+      used with emscripten
 
 - Options object instead of position args
     - Scaling options
@@ -16,4 +16,3 @@
         - width, height
 
 - Test cases for emscripten and standard
-- Install logic
