@@ -10,198 +10,337 @@
 
 int luaopen_santoku_jpeg (lua_State *);
 
-struct my_comp_error_mgr {
-  struct jpeg_error_mgr err;
-  jmp_buf setjmp_buffer;
-};
+struct tk_jpeg_state;
 
-struct my_decomp_error_mgr {
-  struct jpeg_error_mgr err;
-  jmp_buf setjmp_buffer;
-};
-
-struct my_source_mgr {
-  struct jpeg_source_mgr src;
-  void *origin;
-  size_t skip;
-  int row_stride;
-  JSAMPARRAY buffer;
-};
-
-struct my_destination_mgr {
-  struct jpeg_destination_mgr dest;
-  void *origin;
-};
-
-struct my_decompress_struct {
+typedef struct
+{
   struct jpeg_decompress_struct decomp;
-  struct my_decomp_error_mgr *err;
-  struct my_source_mgr *src;
-  lua_State *L;
-  int denom;
-  size_t bufsize;
-};
+  struct tk_jpeg_state *state;
 
-struct my_compress_struct {
+} tk_jpeg_decompress_t;
+
+typedef struct
+{
   struct jpeg_compress_struct comp;
-  struct my_comp_error_mgr *err;
-  struct my_destination_mgr *dest;
+  struct tk_jpeg_state *state;
+
+} tk_jpeg_compress_t;
+
+typedef enum
+{
+  TK_JPEG_STATE_VALUE_PULL = 1,
+  TK_JPEG_STATE_VALUE_PUSH = 2,
+  TK_JPEG_STATE_VALUE_TOTAL = 2
+
+} TK_JPEG_STATE_VALUE;
+
+typedef enum
+{
+  TK_JPEG_STATE_READ_HEADER,
+  TK_JPEG_STATE_START_DECOMPRESS,
+  TK_JPEG_STATE_START_COMPRESS,
+  TK_JPEG_STATE_PROCESS_BODY,
+  TK_JPEG_STATE_FINISH,
+
+} TK_JPEG_STATE;
+
+typedef struct tk_jpeg_state
+{
+  TK_JPEG_STATE state;
+
+  tk_jpeg_compress_t comp;
+  struct jpeg_error_mgr comp_err;
+  struct jpeg_source_mgr src;
+  long src_skip;
+  void *src_origin;
+  JSAMPARRAY src_buffer;
+
+  tk_jpeg_decompress_t decomp;
+  struct jpeg_error_mgr decomp_err;
+  struct jpeg_destination_mgr dest;
+  void *dest_origin;
+  JSAMPROW dest_rows[1];
+
+  int row_stride;
+  jmp_buf setjmp_buffer;
+
   lua_State *L;
-  size_t bufsize;
-};
+  lua_Integer bufsize;
+  lua_Integer scale_denom;
+  lua_Integer scale_num;
+  lua_Integer scale_quality;
 
-void my_comp_error_exit (j_common_ptr comp)
+} tk_jpeg_state_t;
+
+void tk_jpeg_comp_err_exit (j_common_ptr jp)
 {
-  (*comp->err->output_message)(comp);
+  (*jp->err->output_message)(jp);
 }
 
-void my_comp_output_message (j_common_ptr comp)
+void tk_jpeg_decomp_err_exit (j_common_ptr jp)
 {
-  struct my_comp_error_mgr *myerr = (struct my_comp_error_mgr *) comp->err;
-  struct my_compress_struct *mycomp = (struct my_compress_struct *) comp;
+  (*jp->err->output_message)(jp);
+}
+
+void tk_jpeg_comp_output_message (j_common_ptr jp)
+{
+  tk_jpeg_compress_t *comp = (tk_jpeg_compress_t *) jp;
+  lua_State *L = comp->state->L;
+
   char buffer[JMSG_LENGTH_MAX];
-  (*comp->err->format_message)(comp, buffer);
-  lua_pushboolean(mycomp->L, 0);
-  lua_pushstring(mycomp->L, "compression error: ");
-  lua_pushstring(mycomp->L, buffer);
-  lua_concat(mycomp->L, 2);
-  longjmp(myerr->setjmp_buffer, 1);
+  (*jp->err->format_message)(jp, buffer);
+
+  lua_pushboolean(L, 0);
+  lua_pushstring(L, "compression error: ");
+  lua_pushstring(L, buffer);
+  lua_concat(L, 2);
+
+  longjmp(comp->state->setjmp_buffer, 1);
 }
 
-void my_decomp_error_exit (j_common_ptr decomp)
+void tk_jpeg_decomp_output_message (j_common_ptr jp)
 {
-  (*decomp->err->output_message)(decomp);
-}
+  tk_jpeg_decompress_t *decomp = (tk_jpeg_decompress_t *) jp;
+  lua_State *L = decomp->state->L;
 
-void my_decomp_output_message (j_common_ptr decomp)
-{
-  struct my_decomp_error_mgr *myerr = (struct my_decomp_error_mgr *) decomp->err;
-  struct my_decompress_struct *mydecomp = (struct my_decompress_struct *) decomp;
   char buffer[JMSG_LENGTH_MAX];
-  (*decomp->err->format_message)(decomp, buffer);
-  lua_pushboolean(mydecomp->L, 0);
-  lua_pushstring(mydecomp->L, "decompression error: ");
-  lua_pushstring(mydecomp->L, buffer);
-  lua_concat(mydecomp->L, 2);
-  longjmp(myerr->setjmp_buffer, 1);
+  (*jp->err->format_message)(jp, buffer);
+
+  lua_pushboolean(L, 0);
+  lua_pushstring(L, "decompression error: ");
+  lua_pushstring(L, buffer);
+  lua_concat(L, 2);
+
+  longjmp(decomp->state->setjmp_buffer, 1);
 }
 
-void my_init_source (j_decompress_ptr decomp) {
-  struct my_decompress_struct *mydecomp = (struct my_decompress_struct *) decomp;
-  struct my_source_mgr *src = (struct my_source_mgr *) decomp->src;
-  decomp->src->bytes_in_buffer = 0;
-  src->origin = malloc(mydecomp->bufsize);
-  decomp->src->next_input_byte = src->origin;
+void tk_jpeg_init_source (j_decompress_ptr jp)
+{
+  tk_jpeg_decompress_t *decomp = (tk_jpeg_decompress_t *) jp;
+
+  decomp->state->src.bytes_in_buffer = 0;
+  decomp->state->src_origin = malloc(decomp->state->bufsize);
+  decomp->state->src.next_input_byte = decomp->state->src_origin;
 }
 
-boolean my_fill_input_buffer (j_decompress_ptr decomp) {
+boolean tk_jpeg_fill_input_buffer (j_decompress_ptr jp)
+{
   return FALSE;
 }
 
-void my_skip_input_data (j_decompress_ptr decomp, long n) {
-  struct my_source_mgr *src = (struct my_source_mgr *) decomp->src;
-  if (decomp->src->bytes_in_buffer < n) {
-    src->skip += n - decomp->src->bytes_in_buffer;
-    decomp->src->bytes_in_buffer = 0;
+void tk_jpeg_skip_input_data (j_decompress_ptr jp, long n)
+{
+  tk_jpeg_decompress_t *decomp = (tk_jpeg_decompress_t *) jp;
+
+  if (decomp->state->src.bytes_in_buffer < n) {
+    decomp->state->src_skip += n - decomp->state->src.bytes_in_buffer;
+    decomp->state->src.bytes_in_buffer = 0;
   } else {
-    decomp->src->next_input_byte += n;
-    decomp->src->bytes_in_buffer -= n;
+    decomp->state->src.next_input_byte += n;
+    decomp->state->src.bytes_in_buffer -= n;
   }
 }
 
-void my_term_source (j_decompress_ptr decomp) {
-  struct my_source_mgr *src = (struct my_source_mgr *) decomp->src;
-  free(src->origin);
+void tk_jpeg_term_source (j_decompress_ptr jp)
+{
+  tk_jpeg_decompress_t *decomp = (tk_jpeg_decompress_t *) jp;
+
+  free(decomp->state->src_origin);
+  decomp->state->src_origin = NULL;
 }
 
-void my_init_destination (j_compress_ptr comp) {
-  struct my_compress_struct *mycomp = (struct my_compress_struct *) comp;
-  struct my_destination_mgr *dest = (struct my_destination_mgr *) comp->dest;
-  comp->dest->free_in_buffer = mycomp->bufsize;
-  dest->origin = malloc(mycomp->bufsize);
-  comp->dest->next_output_byte = dest->origin;
+void tk_jpeg_init_destination (j_compress_ptr jp)
+{
+  tk_jpeg_compress_t *comp = (tk_jpeg_compress_t *) jp;
+
+  comp->state->dest.free_in_buffer = comp->state->bufsize;
+  comp->state->dest_origin = malloc(comp->state->bufsize);
+  comp->state->dest.next_output_byte = comp->state->dest_origin;
 }
 
-boolean my_empty_output_buffer (j_compress_ptr comp) {
+boolean tk_jpeg_empty_output_buffer (j_compress_ptr jp)
+{
   return FALSE;
 }
 
-void my_term_destination (j_compress_ptr comp) {
-  struct my_destination_mgr *dest = (struct my_destination_mgr *) comp->dest;
-  free(dest->origin);
+void tk_jpeg_term_destination (j_compress_ptr jp)
+{
+  tk_jpeg_compress_t *comp = (tk_jpeg_compress_t *) jp;
+
+  free(comp->state->dest_origin);
+  comp->state->dest_origin = NULL;
 }
 
-void push_data (struct my_compress_struct *comp, struct my_decompress_struct *decomp, int i_push_data) {
+void tk_jpeg_destroy (tk_jpeg_state_t *state)
+{
+  tk_jpeg_term_source(&state->decomp.decomp);
+  tk_jpeg_term_destination(&state->comp.comp);
+  jpeg_destroy_decompress(&state->decomp.decomp);
+  jpeg_destroy_compress(&state->comp.comp);
+}
 
-  while (1) {
+int tk_jpeg_loop (lua_State *);
 
-    JSAMPROW rows[1]; rows[0] = decomp->src->buffer[0];
-    int rc = jpeg_write_scanlines(&comp->comp, rows, 1);
+int tk_jpeg_push_data_cont (lua_State *L, int status, lua_KContext ctx)
+{
+  tk_jpeg_state_t *state = lua_touserdata(L, -1);
 
-    size_t len = (void *)comp->dest->dest.next_output_byte - comp->dest->origin;
+  state->dest.next_output_byte = state->dest_origin;
+  state->dest.free_in_buffer = state->bufsize;
 
-    if (len <= 0)
-      return;
+  if (status == LUA_YIELD)
+    return tk_jpeg_loop(L);
+  else
+    return 0;
+}
 
-    lua_pushvalue(comp->L, i_push_data);
-    lua_pushlstring(comp->L, (char *)comp->dest->origin, len);
-    lua_pushnumber(comp->L, len);
-    lua_call(comp->L, 2, 0);
+void tk_jpeg_push_data (lua_State *L)
+{
+  tk_jpeg_state_t *state = lua_touserdata(L, -1);
 
-    comp->dest->dest.next_output_byte = comp->dest->origin;
-    comp->dest->dest.free_in_buffer = comp->bufsize;
+  state->dest_rows[0] = state->src_buffer[0];
 
-    if (rc == 1)
-      break;
+  while (jpeg_write_scanlines(&state->comp.comp, state->dest_rows, 1) != 1);
 
+  ptrdiff_t len = (void *)state->dest.next_output_byte - state->dest_origin;
+
+  if (len > 0) {
+    lua_getiuservalue(L, -1, TK_JPEG_STATE_VALUE_PUSH);
+    lua_pushlstring(L, (char *)state->dest_origin, len);
+    lua_callk(L, 1, 0, 0, tk_jpeg_push_data_cont);
   }
 
+  tk_jpeg_push_data_cont(L, LUA_OK, 0);
 }
 
-void pull_data (struct my_decompress_struct *decomp, int i_pull_data) {
+int tk_jpeg_pull_data_cont (lua_State *L, int status, lua_KContext ctx)
+{
+  tk_jpeg_state_t *state = lua_touserdata(L, -2);
+  luaL_checktype(L, -1, LUA_TSTRING);
 
-  lua_pushvalue(decomp->L, i_pull_data);
-  lua_call(decomp->L, 0, 2);
-  luaL_checktype(decomp->L, -2, LUA_TSTRING);
-  const char *data = lua_tostring(decomp->L, -2);
-  luaL_checktype(decomp->L, -1, LUA_TNUMBER);
-  long size = lua_tointeger(decomp->L, -1);
+  size_t size;
+  const char *data = lua_tolstring(L, -1, &size);
+  lua_pop(L, 1);
 
-  if (decomp->src->skip > 0) {
-
-    assert(decomp->src->src.bytes_in_buffer == 0);
-
-    if (decomp->src->skip >= size) {
-
-      decomp->src->skip -= size;
-      goto next;
-
+  if (state->src_skip > 0) {
+    assert(state->src.bytes_in_buffer == 0);
+    if (state->src_skip >= size) {
+      state->src_skip -= size;
+      return 0;
     } else {
-
-      data += decomp->src->skip;
-      size -= decomp->src->skip;
-
-      decomp->src->skip = 0;
-
+      data += state->src_skip;
+      size -= state->src_skip;
+      state->src_skip = 0;
     }
-
   }
 
   // TODO: check for overflow
   // TODO: Use jpegs support for multiple
   // buffers instead of this
-  memmove(decomp->src->origin, decomp->src->src.next_input_byte, decomp->src->src.bytes_in_buffer);
-  decomp->src->src.next_input_byte = decomp->src->origin;
-  memcpy((void *)decomp->src->src.next_input_byte + decomp->src->src.bytes_in_buffer, data, size);
-  decomp->src->src.bytes_in_buffer += size;
+  memmove(state->src_origin, state->src.next_input_byte, state->src.bytes_in_buffer);
+  state->src.next_input_byte = state->src_origin;
+  memcpy((void *)state->src.next_input_byte + state->src.bytes_in_buffer, data, size);
+  state->src.bytes_in_buffer += size;
 
-next:
-  lua_pop(decomp->L, 2);
-
+  if (status == LUA_YIELD)
+    return tk_jpeg_loop(L);
+  else
+    return 0;
 }
 
-int mt_scale (lua_State *L) {
+void tk_jpeg_pull_data (lua_State *L)
+{
+  lua_getiuservalue(L, -1, TK_JPEG_STATE_VALUE_PULL);
+  lua_callk(L, 0, 1, 0, tk_jpeg_pull_data_cont);
+  tk_jpeg_pull_data_cont(L, LUA_OK, 0);
+}
 
+int tk_jpeg_loop (lua_State *L)
+{
+  tk_jpeg_state_t *state = lua_touserdata(L, -1);
+
+  // TODO: Will this cause problems with lua's
+  // coroutines?
+  if (setjmp(state->setjmp_buffer)) {
+    tk_jpeg_destroy(state);
+    return 2;
+  }
+
+  while (1)
+  {
+    switch (state->state) {
+
+      case TK_JPEG_STATE_READ_HEADER:
+
+        if (jpeg_read_header(&state->decomp.decomp, 1) == JPEG_SUSPENDED) {
+          tk_jpeg_pull_data(L);
+          continue;
+        } else {
+          state->state = TK_JPEG_STATE_START_DECOMPRESS;
+          continue;
+        }
+
+      case TK_JPEG_STATE_START_DECOMPRESS:
+
+        if (jpeg_start_decompress(&state->decomp.decomp) == FALSE) {
+          tk_jpeg_pull_data(L);
+          continue;
+        } else {
+          state->state = TK_JPEG_STATE_START_COMPRESS;
+          continue;
+        }
+
+      case TK_JPEG_STATE_START_COMPRESS:
+
+        state->comp.comp.image_width = state->decomp.decomp.output_width;
+        state->comp.comp.image_height = state->decomp.decomp.output_height;
+        state->comp.comp.input_components = state->decomp.decomp.output_components;
+        state->comp.comp.in_color_space = state->decomp.decomp.out_color_space;
+        jpeg_set_defaults(&state->comp.comp);
+        jpeg_set_quality(&state->comp.comp, state->scale_quality, 1);
+        state->comp.comp.scale_num = state->scale_num;
+        state->comp.comp.scale_denom = state->scale_denom;
+
+        jpeg_start_compress(&state->comp.comp, TRUE);
+
+        state->row_stride = state->decomp.decomp.output_width * state->decomp.decomp.output_components;
+        state->src_buffer = (*state->comp.comp.mem->alloc_sarray)((j_common_ptr) &state->comp.comp, JPOOL_IMAGE, state->row_stride, 1);
+
+        state->state = TK_JPEG_STATE_PROCESS_BODY;
+        continue;
+
+      case TK_JPEG_STATE_PROCESS_BODY:
+
+        if (state->decomp.decomp.output_scanline >= state->decomp.decomp.output_height) {
+          state->state = TK_JPEG_STATE_FINISH;
+          continue;
+        } else if (jpeg_read_scanlines(&state->decomp.decomp, state->src_buffer, 1)) {
+          tk_jpeg_push_data(L);
+          continue;
+        } else {
+          tk_jpeg_pull_data(L);
+          continue;
+        }
+
+      case TK_JPEG_STATE_FINISH:
+
+        if (jpeg_finish_decompress(&state->decomp.decomp) == FALSE) {
+          tk_jpeg_pull_data(L);
+          continue;
+        } else {
+          jpeg_finish_compress(&state->comp.comp);
+          tk_jpeg_destroy(state);
+          lua_pop(L, 1);
+          lua_pushboolean(L, 1);
+          return 1;
+        }
+
+    }
+  }
+}
+
+int tk_jpeg_mt_scale (lua_State *L)
+{
   if (lua_gettop(L) != 6)
     luaL_error(L, "expected 6 arguments");
 
@@ -209,16 +348,18 @@ int mt_scale (lua_State *L) {
   int i_push_data = lua_absindex(L, -5);
   int i_scale_num = lua_absindex(L, -4);
   int i_scale_denom = lua_absindex(L, -3);
-  int i_quality = lua_absindex(L, -2);
+  int i_scale_quality = lua_absindex(L, -2);
   int i_bufsize = lua_absindex(L, -1);
 
   // function returning (string, #string) to get
   // more data to decompress
-  luaL_checktype(L, i_pull_data, LUA_TFUNCTION);
+  if (lua_type(L, i_pull_data) != LUA_TTABLE)
+      luaL_checktype(L, i_pull_data, LUA_TFUNCTION);
 
   // function accepting (string, #string) to use
   // output data
-  luaL_checktype(L, i_push_data, LUA_TFUNCTION);
+  if (lua_type(L, i_push_data) != LUA_TTABLE)
+      luaL_checktype(L, i_push_data, LUA_TFUNCTION);
 
   // scale fraction numerator
   luaL_checktype(L, i_scale_num, LUA_TNUMBER);
@@ -226,115 +367,71 @@ int mt_scale (lua_State *L) {
   // scale fraction denominator
   luaL_checktype(L, i_scale_denom, LUA_TNUMBER);
 
-  // quality
-  luaL_checktype(L, i_quality, LUA_TNUMBER);
+  // scale quality
+  luaL_checktype(L, i_scale_quality, LUA_TNUMBER);
 
   // byte size of buffers (must be larger than
   // 2K for good performance)
   luaL_checktype(L, i_bufsize, LUA_TNUMBER);
 
-  struct my_comp_error_mgr comp_err;
-  struct my_decomp_error_mgr decomp_err;
+  tk_jpeg_state_t *state = lua_newuserdatauv(L, sizeof(tk_jpeg_state_t), TK_JPEG_STATE_VALUE_TOTAL);
+  int i_state = lua_absindex(L, -1);
 
-  struct my_source_mgr src;
-  src.skip = 0;
-  src.src.init_source = &my_init_source;
-  src.src.fill_input_buffer = &my_fill_input_buffer;
-  src.src.skip_input_data = &my_skip_input_data;
-  src.src.resync_to_restart = &jpeg_resync_to_restart;
-  src.src.term_source = &my_term_source;
+  lua_pushvalue(L, i_pull_data);
+  lua_setiuservalue(L, i_state, TK_JPEG_STATE_VALUE_PULL);
 
-  struct my_destination_mgr dest;
-  dest.dest.init_destination = &my_init_destination;
-  dest.dest.empty_output_buffer = &my_empty_output_buffer;
-  dest.dest.term_destination = &my_term_destination;
+  lua_pushvalue(L, i_push_data);
+  lua_setiuservalue(L, i_state, TK_JPEG_STATE_VALUE_PUSH);
 
-  struct my_compress_struct comp;
-  comp.bufsize = lua_tointeger(L, -1);
-  comp.L = L;
-  comp.dest = &dest;
-  comp.err = &comp_err;
-  comp.comp.err = jpeg_std_error(&comp_err.err);
-  jpeg_create_compress(&comp.comp);
-  comp.comp.dest = &dest.dest;
+  state->state = TK_JPEG_STATE_READ_HEADER;
+  state->L = L;
+  state->bufsize = lua_tointeger(L, i_bufsize);
+  state->scale_quality = lua_tointeger(L, i_scale_quality);
+  state->scale_num = lua_tointeger(L, i_scale_num);
+  state->scale_denom = lua_tointeger(L, i_scale_denom);
+  state->src_skip = 0;
 
-  comp_err.err.error_exit = my_comp_error_exit;
-  comp_err.err.output_message = my_comp_output_message;
+  state->src.init_source = &tk_jpeg_init_source;
+  state->src.fill_input_buffer = &tk_jpeg_fill_input_buffer;
+  state->src.skip_input_data = &tk_jpeg_skip_input_data;
+  state->src.resync_to_restart = &jpeg_resync_to_restart;
+  state->src.term_source = &tk_jpeg_term_source;
 
-  struct my_decompress_struct decomp;
-  decomp.bufsize = lua_tointeger(L, -1);
-  decomp.L = L;
-  decomp.src = &src;
-  decomp.err = &decomp_err;
-  jpeg_create_decompress(&decomp.decomp);
-  decomp.decomp.src = &src.src;
-  decomp.decomp.err = jpeg_std_error(&decomp_err.err);
+  state->dest.init_destination = &tk_jpeg_init_destination;
+  state->dest.empty_output_buffer = &tk_jpeg_empty_output_buffer;
+  state->dest.term_destination = &tk_jpeg_term_destination;
 
-  decomp_err.err.error_exit = my_decomp_error_exit;
-  decomp_err.err.output_message = my_decomp_output_message;
+  state->comp.state = state;
+  state->comp.comp.err = jpeg_std_error(&state->comp_err);
+  jpeg_create_compress(&state->comp.comp);
+  state->comp.comp.dest = &state->dest;
 
-  if (setjmp(comp_err.setjmp_buffer)) {
-    jpeg_destroy_decompress(&decomp.decomp);
-    my_term_source(&decomp.decomp);
-    jpeg_destroy_compress(&comp.comp);
-    my_term_destination(&comp.comp);
-    return 2;
-  }
+  state->comp_err.error_exit = &tk_jpeg_comp_err_exit;
+  state->comp_err.output_message = &tk_jpeg_comp_output_message;
 
-  if (setjmp(decomp_err.setjmp_buffer)) {
-    jpeg_destroy_decompress(&decomp.decomp);
-    my_term_source(&decomp.decomp);
-    jpeg_destroy_compress(&comp.comp);
-    my_term_destination(&comp.comp);
-    return 2;
-  }
+  state->decomp.state = state;
+  jpeg_create_decompress(&state->decomp.decomp);
+  state->decomp.decomp.err = jpeg_std_error(&state->decomp_err);
+  state->decomp.decomp.src = &state->src;
 
-  while (JPEG_SUSPENDED == jpeg_read_header(&decomp.decomp, 1))
-    pull_data(&decomp, i_pull_data);
+  state->decomp_err.error_exit = &tk_jpeg_decomp_err_exit;
+  state->decomp_err.output_message = &tk_jpeg_decomp_output_message;
 
-  while (FALSE == jpeg_start_decompress(&decomp.decomp))
-    pull_data(&decomp, i_pull_data);
+  lua_insert(L, -7);
+  lua_pop(L, 6);
 
-  comp.comp.image_width = decomp.decomp.output_width;
-  comp.comp.image_height = decomp.decomp.output_height;
-  comp.comp.input_components = decomp.decomp.output_components;
-  comp.comp.in_color_space = decomp.decomp.out_color_space;
-  jpeg_set_defaults(&comp.comp);
-  jpeg_set_quality(&comp.comp, lua_tointeger(L, i_quality), 1);
-  comp.comp.scale_num = lua_tointeger(L, i_scale_num);
-  comp.comp.scale_denom = lua_tointeger(L, i_scale_denom);
-
-  jpeg_start_compress(&comp.comp, TRUE);
-
-  src.row_stride = decomp.decomp.output_width * decomp.decomp.output_components;
-  src.buffer = (*comp.comp.mem->alloc_sarray)((j_common_ptr) &comp.comp, JPOOL_IMAGE, src.row_stride, 1);
-
-  while (decomp.decomp.output_scanline < decomp.decomp.output_height) {
-    if (jpeg_read_scanlines(&decomp.decomp, src.buffer, 1)) {
-      push_data(&comp, &decomp, i_push_data);
-    } else {
-      pull_data(&decomp, i_pull_data);
-    }
-  }
-
-  while (FALSE == jpeg_finish_decompress(&decomp.decomp))
-    pull_data(&decomp, i_pull_data);
-
-  jpeg_finish_compress(&comp.comp);
-  jpeg_destroy_compress(&comp.comp);
-  jpeg_destroy_decompress(&decomp.decomp);
-
-  lua_pushboolean(L, 1);
-  return 1;
+  return tk_jpeg_loop(L);
 }
 
-luaL_Reg mt_fns[] = {
-  { "scale", mt_scale },
+luaL_Reg tk_jpeg_mt_fns[] =
+{
+  { "scale", tk_jpeg_mt_scale },
   { NULL, NULL }
 };
 
-int luaopen_santoku_jpeg (lua_State *L) {
+int luaopen_santoku_jpeg (lua_State *L)
+{
   lua_newtable(L);
-  luaL_setfuncs(L, mt_fns, 0);
+  luaL_setfuncs(L, tk_jpeg_mt_fns, 0);
   return 1;
 }
