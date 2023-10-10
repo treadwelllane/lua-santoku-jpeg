@@ -11,21 +11,6 @@ test("jpeg", function ()
 
   test("resize", function ()
 
-    -- TODO: Ideally it should look like this:
-    --
-    -- test("resizes a jpeg", function ()
-    --   assert(err.pwrap(function (check)
-    --     -- Generator producing file chunks
-    --     local original_chunks = check(fs.chunks("test/spec/santoku/jpeg/image.jpg", 100))
-    --     -- Generator producing scaled chunks
-    --     local scaled_chunks = check(jpeg.scaler(original_chunks, 8, 2000))
-    --     -- Run generator and concat produced chunks
-    --     local data = scaled_chunks:map(check):concat()
-    --     -- Write the file out
-    --     check(fs.writefile("test/spec/santoku/jpeg/image.smaller.jpg", data))
-    --   end))
-    -- end)
-
     test("resizes a jpeg (no coroutines)", function ()
 
       local ok, input_data = fs.readfile("test/spec/santoku/jpeg/image.jpg")

@@ -4,109 +4,232 @@ GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
 
-BUILD_DIR ?= build/work
-TEST_DIR ?= build/test
-CONFIG_DIR ?= config
-SRC_DIR ?= src
+BUILD_DIR ?= $(PWD)/build
+WORK_DIR ?= $(BUILD_DIR)/work
+TEST_DIR ?= $(BUILD_DIR)/test
+CONFIG_DIR ?= $(PWD)/config
+SRC_DIR ?= $(PWD)/src
+TEST_SRC_DIR ?= $(PWD)/test
 
 SRC_LUA ?= $(shell find $(SRC_DIR) -name '*.lua')
 SRC_C ?= $(shell find $(SRC_DIR) -name '*.c')
-BUILD_LUA ?= $(patsubst $(SRC_DIR)/%.lua, $(BUILD_DIR)/%.lua, $(SRC_LUA))
-BUILD_C ?= $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.so, $(SRC_C))
+
+BUILD_LUA ?= $(patsubst $(SRC_DIR)/%.lua, $(WORK_DIR)/%.lua, $(SRC_LUA))
+BUILD_C ?= $(patsubst $(SRC_DIR)/%.c, $(WORK_DIR)/%.so, $(SRC_C))
+
 INST_LUA ?= $(patsubst $(SRC_DIR)/%.lua, $(INST_LUADIR)/%.lua, $(SRC_LUA))
 INST_C ?= $(patsubst $(SRC_DIR)/%.c, $(INST_LIBDIR)/%.so, $(SRC_C))
 
-# TODO: TEST_JPEG_DIR shoulnd't be specified
-# here. Only doing it now so that tests work
-LOCAL_CFLAGS ?= $(if $(LUA_INCDIR), -I$(LUA_INCDIR)) -I $(TEST_JPEG_DIR) -Wall -O3
-LOCAL_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) -L $(TEST_JPEG_DIR)/.libs -ljpeg -Wall -O3
-
-LIBFLAG ?= -shared
-
-ROCKSPEC ?= $(BUILD_DIR)/$(NAME)-$(VERSION).rockspec
+ROCKSPEC ?= $(WORK_DIR)/$(NAME)-$(VERSION).rockspec
 ROCKSPEC_T ?= $(CONFIG_DIR)/template.rockspec
 
 LUAROCKS ?= luarocks
 
-TEST_SPEC_DIST_DIR ?= $(TEST_DIR)/spec
-TEST_SPEC_SRC_DIR ?= test/spec
+LIBFLAG ?= -shared
 
-TEST_SPEC_SRCS ?= $(shell find $(TEST_SPEC_SRC_DIR) -type f -name '*.lua')
-TEST_SPEC_DISTS ?= $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST_SPEC_SRCS))
+LIB_CFLAGS ?= $(if $(LUA_INCDIR), -I$(LUA_INCDIR)) -Wall -O3
+LIB_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) $(LIBFLAG) -ljpeg -Wall -O3
 
-ifdef TEST
-TESTED_FILES := $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST))
-else
-TESTED_FILES = $(TEST_SPEC_DISTS)
+TOKU_BUNDLE ?= toku bundle -M -i debug -l luacov -l luacov.hook
+TOKU_TEST ?= toku test -s
+
+DEPS ?= $(ROCKSPEC)
+
+ifneq ($(filter-out test luarocks-test-run, $(MAKECMDGOALS)), $(MAKECMDGOALS))
+LOCAL_LUAROCKS = 1
+LOCAL_JPEG = 1
 endif
+
+ifeq ($(EMSCRIPTEN),1)
 
 ifneq ($(SANITIZE),0)
 SANITIZER_FLAGS ?= -fsanitize=address -fsanitize=undefined -fsanitize-address-use-after-return=always -fsanitize-address-use-after-scope
 SANITIZER_VARS ?= ASAN_SYMBOLIZER_PATH="$(shell which llvm-symbolizer)"
+TEST_CFLAGS := $(SANITIZER_FLAGS) $(TEST_CFLAGS)
+TEST_LDFLAGS := $(SANITIZER_FLAGS) $(TEST_LDFLAGS)
+LIB_CFLAGS := $(SANITIZER_FLAGS) $(TEST_CFLAGS)
+LIB_LDFLAGS := $(SANITIZER_FLAGS) $(TEST_LDFLAGS)
 endif
 
-TEST_CC ?= emcc
-TEST_EM_VARS ?= $(SANITIZER_VARS) CC="$(TEST_CC)" LD="$(TEST_CC)" AR="emar rcu" NM="emnm" RANLIB="emranlib"
-TEST_CFLAGS ?= -Wall -O3 -gsource-map -I $(TEST_LUA_INC_DIR) -I $(TEST_JPEG_DIR) --bind -sALLOW_MEMORY_GROWTH $(SANITIZER_FLAGS)
-TEST_LDFLAGS ?= -Wall -O3 -gsource-map -L $(TEST_LUA_LIB_DIR) $(LOCAL_LDFLAGS) $(LIBFLAG) $(SANITIZER_FLAGS) -lnodefs.js -lnoderawfs.js
-TEST_VARS ?= $(TEST_EM_VARS) LUAROCKS='$(TEST_LUAROCKS)' BUILD_DIR="$(TEST_DIR)/build" CFLAGS="$(TEST_CFLAGS)" LDFLAGS="$(TEST_LDFLAGS)" LIBFLAG="$(TEST_LIBFLAG)"
-TEST_LUAROCKS_VARS ?= $(TEST_EM_VARS)	CFLAGS="$(TEST_LUAROCKS_CFLAGS)" LDFLAGS="$(TEST_LUAROCKS_LDFLAGS)" LIBFLAG="$(TEST_LUAROCKS_LIBFLAG)"
-TEST_LUAROCKS_CFLAGS ?= -I $(TEST_LUA_INC_DIR) $(CFLAGS)
-TEST_LUAROCKS_LDFLAGS ?= -L $(TEST_LUA_LIB_DIR) $(LDFLAGS)
-TEST_LUAROCKS_LIBFLAG ?= $(LIBFLAG)
-TEST_LUA_CFLAGS ?= -O3 $(CFLAGS)
-TEST_LUA_LDFLAGS ?= $(LDFLAGS) -lnodefs.js -lnoderawfs.js
-TEST_LUA_VARS ?= $(TEST_EM_VARS) CFLAGS="$(TEST_LUA_CFLAGS)" LDFLAGS="$(TEST_LUA_LDFLAGS)"
-TEST_LUA_PATH ?= $(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?.lua;$(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?/init.lua
-TEST_LUA_CPATH ?= $(TEST_LUAROCKS_TREE)/lib/lua/$(TEST_LUA_MINMAJ)/?.so
+BUILD_DIR := $(BUILD_DIR)/emscripten
 
-TEST_LUAROCKS_CFG ?= $(TEST_DIR)/luarocks.config.test.lua
-TEST_LUAROCKS_CFG_T ?= $(CONFIG_DIR)/luarocks.config.test.lua
-TEST_LUAROCKS_TREE ?= $(TEST_DIR)/luarocks
-TEST_LUAROCKS ?= LUAROCKS_CONFIG="$(TEST_LUAROCKS_CFG)" luarocks --tree "$(TEST_LUAROCKS_TREE)"
+TOKU_BUNDLE += -C
+TOKU_TEST += -i node
 
-TEST_LUA_VERSION ?= 5.4.4
-TEST_LUA_MAKE ?= $(TEST_EM_VARS) $(MAKE) $(TEST_LUA_VARS)
-TEST_LUA_MAKE_LOCAL ?= $(TEST_EM_VARS) $(MAKE) $(TEST_LUA_VARS) local
-TEST_LUA_MINMAJ ?= $(shell echo $(TEST_LUA_VERSION) | grep -o ".\..")
-TEST_LUA_ARCHIVE ?= lua-$(TEST_LUA_VERSION).tar.gz
-TEST_LUA_DL ?= $(TEST_DIR)/$(TEST_LUA_ARCHIVE)
-TEST_LUA_DIR ?= $(TEST_DIR)/lua-$(TEST_LUA_VERSION)
-TEST_LUA_URL ?= https://www.lua.org/ftp/$(TEST_LUA_ARCHIVE)
-TEST_LUA_DIST_DIR ?= $(TEST_LUA_DIR)/install
-TEST_LUA_INC_DIR ?= $(TEST_LUA_DIST_DIR)/include
-TEST_LUA_LIB_DIR ?= $(TEST_LUA_DIST_DIR)/lib
-TEST_LUA_LIB ?= $(TEST_LUA_DIST_DIR)/lib/liblua.a
-TEST_LUA_INTERP ?= $(TEST_LUA_DIST_DIR)/bin/lua
+TEST_CFLAGS += -gsource-map
+TEST_LDFLAGS += -gsource-map
 
-TEST_JPEG_VERSION ?= 9e
-TEST_JPEG_URL ?= https://ijg.org/files/jpegsrc.v$(TEST_JPEG_VERSION).tar.gz
-TEST_JPEG_ARCHIVE ?= jpegsrc.v$(TEST_JPEG_VERSION).tar.gz
-TEST_JPEG_DL ?= $(TEST_DIR)/$(TEST_JPEG_ARCHIVE)
-TEST_JPEG_DIR ?= $(TEST_DIR)/jpeg-$(TEST_JPEG_VERSION)
-TEST_JPEG_CONFIGURE ?= $(TEST_EM_VARS) emconfigure ./configure
-TEST_JPEG_MAKE ?= $(TEST_EM_VARS) emmake $(MAKE) $(TEST_LUA_VARS)
-TEST_JPEG_LIB ?= $(TEST_JPEG_DIR)/.libs/libjpeg.a
+CC = emcc
+LD = emcc
+AR = emar
+AR_LUA = emar rcu
+NM = emnm
+RANLIB = emranlib
 
-TEST_LUACHECK_CFG ?= test/luacheck.lua
-TEST_LUACHECK_SRCS ?= src
+LDFLAGS += -sALLOW_MEMORY_GROWTH -lnodefs.js -lnoderawfs.js
 
-TEST_LUACOV_CFG ?= $(TEST_DIR)/luacov.lua
-TEST_LUACOV_CFG_T ?= test/luacov.lua
-TEST_LUACOV_STATS_FILE ?= $(TEST_DIR)/luacov.stats.out
-TEST_LUACOV_REPORT_FILE ?= $(TEST_DIR)/luacov.report.out
-TEST_LUACOV_INCLUDE ?= src
+# Annoying that this is necessary for separate
+# AR definition for compiling lua
+EM_VARS_LUA = CC="$(CC)" LD="$(CC)" AR="$(AR_LUA)" NM="$(NM)" RANLIB="$(RANLIB)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+EM_VARS = CC="$(CC)" LD="$(CC)" AR="$(AR)" NM="$(NM)" RANLIB="$(RANLIB)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+MAKE = emmake make $(EM_VARS)
+MAKE_LUA = emmake make $(EM_VARS_LUA)
 
-build: $(BUILD_C) $(ROCKSPEC)
+CONFIGURE = emconfigure ./configure
 
-install: $(ROCKSPEC)
+LIB_CFLAGS += --bind
+
+LOCAL_LUA = 1
+LOCAL_JPEG = 1
+
+endif
+
+ifeq ($(LOCAL_LUA),1)
+
+LUA_VERSION ?= 5.4.4
+LUA_MINMAJ ?= $(shell echo $(LUA_VERSION) | grep -o ".\..")
+LUA_ARCHIVE ?= lua-$(LUA_VERSION).tar.gz
+LUA_DL ?= $(WORK_DIR)/$(LUA_ARCHIVE)
+LUA_DIR ?= $(WORK_DIR)/lua-$(LUA_VERSION)
+LUA_URL ?= https://www.lua.org/ftp/$(LUA_ARCHIVE)
+LUA_DIST_DIR ?= $(LUA_DIR)/install
+LUA_INC_DIR ?= $(LUA_DIST_DIR)/include
+LUA_LIB_DIR ?= $(LUA_DIST_DIR)/lib
+LUA_LIB ?= $(LUA_DIST_DIR)/lib/liblua.a
+LUA_INTERP ?= $(LUA_DIST_DIR)/bin/lua
+
+LUA_INCDIR = $(LUA_INC_DIR)
+LUA_LIBDIR = $(LUA_LIB_DIR)
+
+CFLAGS += -I$(LUA_INC_DIR)
+LDFLAGS += -L$(LUA_LIB_DIR)
+LIB_CFLAGS += -I$(LUA_INC_DIR)
+LIB_LDFLAGS += -L$(LUA_LIB_DIR)
+TEST_CFLAGS += -I$(LUA_INC_DIR)
+TEST_LDFLAGS += -L$(LUA_LIB_DIR)
+
+DEPS += $(LUA_DIST_DIR)
+
+$(LUA_DIST_DIR): $(LUA_DL)
+	# rm -rf "$(LUA_DIR)"
+	mkdir -p "$(dir $(LUA_DIR))"
+	tar xf "$(LUA_DL)" -C "$(dir $(LUA_DIR))"
+	cd "$(LUA_DIR)" && $(MAKE_LUA)
+	cd "$(LUA_DIR)" && $(MAKE_LUA) local
+	cp "$(LUA_DIR)/src/"*.wasm "$(LUA_DIST_DIR)/bin/"
+
+$(LUA_DL):
+	curl -LsSo "$(LUA_DL)" "$(LUA_URL)"
+
+else
+
+# TODO: Should this check use luarocks instead?
+LUA_MINMAJ ?= $(shell lua -v | grep -Po 'Lua\s*\K\d+\.\d+')
+
+endif
+
+ifeq ($(LOCAL_JPEG),1)
+
+JPEG_VERSION ?= 9e
+JPEG_URL ?= https://ijg.org/files/jpegsrc.v$(JPEG_VERSION).tar.gz
+JPEG_ARCHIVE ?= jpegsrc.v$(JPEG_VERSION).tar.gz
+JPEG_DL ?= $(WORK_DIR)/$(JPEG_ARCHIVE)
+JPEG_DIR ?= $(WORK_DIR)/jpeg-$(JPEG_VERSION)
+JPEG_LIB ?= $(JPEG_DIR)/.libs/libjpeg.a
+
+LIB_CFLAGS += -I$(JPEG_DIR)
+LIB_LDFLAGS += -L$(JPEG_DIR)/.libs
+TEST_CFLAGS += -I$(JPEG_DIR) $(JPEG_LIB)
+
+ifneq ($(EMSCRIPTEN),1)
+LIB_LDFLAGS += -Wl,-rpath,$(JPEG_DIR)/.libs
+endif
+
+TEST_LDFLAGS += -L$(JPEG_DIR)/.libs
+
+DEPS += $(JPEG_LIB)
+
+$(JPEG_LIB): $(JPEG_DL)
+	# rm -rf "$(JPEG_DIR)"
+	mkdir -p "$(dir $(JPEG_DIR))"
+	tar xf "$(JPEG_DL)" -C "$(dir $(JPEG_DIR))"
+	cd "$(JPEG_DIR)" && $(CONFIGURE)
+	cd "$(JPEG_DIR)" && $(MAKE)
+
+$(JPEG_DL):
+	curl -LsSo "$(JPEG_DL)" "$(JPEG_URL)"
+
+endif
+
+ifdef TEST
+
+TESTED_FILES := $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST))
+
+else
+
+TESTED_FILES = $(TEST_SPEC_DISTS)
+
+endif
+
+TEST_SPEC_DIST_DIR ?= $(TEST_DIR)/spec
+TEST_SPEC_SRC_DIR ?= $(TEST_SRC_DIR)/spec
+
+TEST_SPEC_SRCS ?= $(shell find $(TEST_SPEC_SRC_DIR) -type f -name '*.lua')
+TEST_SPEC_DISTS ?= $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST_SPEC_SRCS))
+
+TEST_CFLAGS ?= -Wall -O3
+TEST_LDFLAGS ?= -Wall -O3
+
+# TEST_LUA_VARS ?= $(TEST_VARS) CFLAGS="$(TEST_LUA_CFLAGS)" LDFLAGS="$(TEST_LUA_LDFLAGS)"
+# TEST_LUA_PATH ?= $(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?.lua;$(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?/init.lua
+# TEST_LUA_CPATH ?= $(TEST_LUAROCKS_TREE)/lib/lua/$(TEST_LUA_MINMAJ)/?.so
+
+ifeq ($(LOCAL_LUAROCKS),1)
+
+LUAROCKS_CFG ?= $(WORK_DIR)/luarocks.config.local.lua
+LUAROCKS_CFG_T ?= $(CONFIG_DIR)/luarocks.config.local.lua
+LUAROCKS_TREE ?= $(WORK_DIR)/luarocks
+
+LUA_PATH = $(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?/init.lua
+LUA_CPATH = $(LUAROCKS_TREE)/lib/lua/$(LUA_MINMAJ)/?.so
+LUAROCKS = LUAROCKS_CONFIG="$(LUAROCKS_CFG)" luarocks --tree "$(LUAROCKS_TREE)"
+
+DEPS += $(LUAROCKS_CFG)
+
+$(LUAROCKS_CFG): $(LUAROCKS_CFG_T)
+	mkdir -p "$(dir $@)"
+	ROCKS_TREE="$(LUAROCKS_TREE)" \
+  LUA_INCDIR="$(LUA_INCDIR)" \
+  LUA_LIBDIR="$(LUA_LIBDIR)" \
+  CC="$(CC)" \
+  LD="$(LD)" \
+  AR="$(AR)" \
+  NM="$(NM)" \
+  RANLIB="$(RANLIB)" \
+  CFLAGS="$(CFLAGS)" \
+  LDFLAGS="$(LDFLAGS)" \
+  LIBFLAG="$(LIBFLAG)" \
+		toku template \
+			-f "$(LUAROCKS_CFG_T)" \
+			-o "$(LUAROCKS_CFG)"
+
+endif
+
+LUACHECK_CFG ?= $(TEST_SRC_DIR)/luacheck.lua
+LUACHECK_SRCS ?= src
+
+LUACOV_CFG ?= $(WORK_DIR)/luacov.lua
+LUACOV_CFG_T ?= $(TEST_SRC_DIR)/luacov.lua
+LUACOV_STATS_FILE ?= $(WORK_DIR)/luacov.stats.out
+LUACOV_REPORT_FILE ?= $(WORK_DIR)/luacov.report.out
+LUACOV_INCLUDE ?= $(SRC_DIR)
+
+build: $(DEPS) $(BUILD_C)
+
+install: $(DEPS)
 	$(LUAROCKS) make $(ROCKSPEC)
 
-luarocks-build: $(BUILD_C)
-
-luarocks-install: $(INST_LUA) $(INST_C)
-
-upload: $(ROCKSPEC)
+upload: $(DEPS)
 	@if test -z "$(LUAROCKS_API_KEY)"; then echo "Missing LUAROCKS_API_KEY variable"; exit 1; fi
 	@if ! git diff --quiet; then echo "Commit your changes first"; exit 1; fi
 	git tag "$(VERSION)"
@@ -117,45 +240,47 @@ upload: $(ROCKSPEC)
 clean:
 	rm -rf build
 
-test: $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TEST_LUA_DIST_DIR) $(TEST_JPEG_LIB)
-	$(TEST_VARS) $(TEST_LUAROCKS) test $(ROCKSPEC)
+test: $(DEPS)
+	$(LUAROCKS) test $(ROCKSPEC)
 
-iterate: $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TEST_LUA_DIST_DIR) $(TEST_JPEG_LIB)
-	@while true; do \
-		$(TEST_VARS) $(TEST_LUAROCKS) test $(ROCKSPEC); \
-		inotifywait -qqr -e close_write -e create -e delete -e delete \
-			Makefile $(SRC_DIR) $(CONFIG_DIR) $(TEST_SPEC_SRC_DIR); \
-	done
+luarocks-build: $(BUILD_C)
 
-# TODO: This should be luarocks-install, but how to we set INST_LIB/BINDIR?
-luarocks-test: install $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TESTED_FILES) $(TEST_LUACOV_CFG)
-	@if LUA_PATH="$(TEST_LUA_PATH)" LUA_CPATH="$(TEST_LUA_CPATH)" SANITIZE="$(SANITIZE)" \
-			toku test -s -i node $(TESTED_FILES); \
-	then \
-		luacov -c "$(PWD)/$(TEST_LUACOV_CFG)"; \
-		cat "$(TEST_LUACOV_REPORT_FILE)" | \
+luarocks-install: $(INST_LUA) $(INST_C)
+
+# TODO: 'install' should be luarocks-install, but how to we set INST_LIB/BINDIR?
+luarocks-test: install $(TESTED_FILES) $(LUACOV_CFG)
+	@if SANITIZE="$(SANITIZE)" $(TOKU_TEST) $(TESTED_FILES); then \
+		luacov -c "$(LUACOV_CFG)"; \
+		cat "$(LUACOV_REPORT_FILE)" | \
 			awk '/^Summary/ { P = NR } P && NR > P + 1'; \
 		echo; \
-		luacheck --config "$(TEST_LUACHECK_CFG)" $(TEST_LUACHECK_SRCS) || true; \
+		luacheck --config "$(LUACHECK_CFG)" $(LUACHECK_SRCS) || true; \
 		echo; \
 	fi
 
-luarocks-test-run:
-	$(TEST_LUAROCKS) $(ARGS)
+luarocks-test-run: $(DEPS)
+	$(LUAROCKS) $(ARGS)
+
+# iterate: $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TEST_LUA_DIST_DIR) $(JPEG_LIB)
+# 	@while true; do \
+# 		$(TEST_VARS) $(TEST_LUAROCKS) test $(ROCKSPEC); \
+# 		inotifywait -qqr -e close_write -e create -e delete -e delete \
+# 			Makefile $(SRC_DIR) $(CONFIG_DIR) $(TEST_SPEC_SRC_DIR); \
+# 	done
 
 $(INST_LUADIR)/%.lua: $(SRC_DIR)/%.lua
 	@if test -z "$(INST_LUADIR)"; then echo "Missing INST_LUADIR variable"; exit 1; fi
 	mkdir -p "$(dir $@)"
-	cp "$^" "$@"
+	cp "$<" "$@"
 
-$(INST_LIBDIR)/%.so: $(BUILD_DIR)/%.so
+$(INST_LIBDIR)/%.so: $(WORK_DIR)/%.so
 	@if test -z "$(INST_LIBDIR)"; then echo "Missing INST_LIBDIR variable"; exit 1; fi
 	mkdir -p "$(dir $@)"
-	cp "$^" "$@"
+	cp "$<" "$@"
 
-$(BUILD_DIR)/%.so: $(SRC_DIR)/%.c
+$(WORK_DIR)/%.so: $(SRC_DIR)/%.c $(JPEG_LIB)
 	mkdir -p "$(dir $@)"
-	$(CC) $(CFLAGS) $(LOCAL_CFLAGS) $(LDFLAGS) $(LOCAL_LDFLAGS) $(LIBFLAG) "$<" -o "$@"
+	$(CC) $(CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(LIB_LDFLAGS) $(LIBFLAG) "$<" -o "$@"
 
 $(ROCKSPEC): $(ROCKSPEC_T)
 	mkdir -p "$(dir $@)"
@@ -168,60 +293,32 @@ $(ROCKSPEC): $(ROCKSPEC_T)
 			-f "$(ROCKSPEC_T)" \
 			-o "$(ROCKSPEC)"
 
-$(TEST_LUAROCKS_CFG): $(TEST_LUAROCKS_CFG_T)
-	mkdir -p "$(dir $@)"
-	ROCKS_TREE="$(PWD)/$(TEST_LUAROCKS_TREE)" \
-	LUA_INCDIR="$(PWD)/$(TEST_LUA_INC_DIR)" \
-	LUA_LIBDIR="$(PWD)/$(TEST_LUA_LIB_DIR)" \
-	$(TEST_LUAROCKS_VARS) \
-		toku template \
-			-f "$(TEST_LUAROCKS_CFG_T)" \
-			-o "$(TEST_LUAROCKS_CFG)"
-
 $(TEST_SPEC_DIST_DIR)/%.test: $(TEST_SPEC_SRC_DIR)/%.lua
 	mkdir -p "$(dir $@)"
-	$(TEST_VARS) toku bundle -C -M -f "$<" -o "$(dir $@)" -O "$(notdir $@)" \
-		-e LUA_PATH "$(TEST_LUA_PATH)" \
-		-e LUA_CPATH "$(TEST_LUA_CPATH)" \
-		-E LUACOV_CONFIG "$(PWD)/$(TEST_LUACOV_CFG)" \
-		-E SANITIZE "$(SANITIZE)" \
-		-l luacov -l luacov.hook \
-		-i debug
+	CC="$(CC)" \
+	LD="$(LD)" \
+	AR="$(AR)" \
+	NM="$(NM)" \
+	RANLIB="$(RANLIB)" \
+	LIBFLAG="$(LIBFLAG)" \
+		$(TOKU_BUNDLE) \
+			-E SANITIZE "$(SANITIZE)" \
+			-E LUACOV_CONFIG "$(LUACOV_CFG)" \
+			-e LUA_PATH "$(LUA_PATH)" \
+			-e LUA_CPATH "$(LUA_CPATH)" \
+			--cflags " $(CFLAGS)" \
+			--ldflags " $(LDFLAGS)" \
+			-f "$<" -o "$(dir $@)" -O "$(notdir $@)" \
 
-$(TEST_LUACOV_CFG): $(TEST_LUACOV_CFG_T)
+$(LUACOV_CFG): $(LUACOV_CFG_T)
 	mkdir -p "$(dir $@)"
-	STATS_FILE="$(PWD)/$(TEST_LUACOV_STATS_FILE)" \
-	REPORT_FILE="$(PWD)/$(TEST_LUACOV_REPORT_FILE)" \
-	INCLUDE="$(TEST_LUACOV_INCLUDE)" \
-	$(TEST_LUAROCKS_VARS) \
+	STATS_FILE="$(LUACOV_STATS_FILE)" \
+	REPORT_FILE="$(LUACOV_REPORT_FILE)" \
+	INCLUDE="$(LUACOV_INCLUDE)" \
 		toku template \
-			-f "$(TEST_LUACOV_CFG_T)" \
-			-o "$(TEST_LUACOV_CFG)"
+			-f "$(LUACOV_CFG_T)" \
+			-o "$(LUACOV_CFG)"
 
-$(TEST_LUA_DIST_DIR): $(TEST_LUA_DL)
-	rm -rf "$(TEST_LUA_DIR)"
-	mkdir -p "$(dir $(TEST_LUA_DIR))"
-	tar xf "$(TEST_LUA_DL)" -C "$(dir $(TEST_LUA_DIR))"
-	cd "$(TEST_LUA_DIR)" && $(TEST_LUA_MAKE)
-	cd "$(TEST_LUA_DIR)" && $(TEST_LUA_MAKE_LOCAL)
-	cp "$(TEST_LUA_DIR)/src/"*.wasm "$(TEST_LUA_DIST_DIR)/bin/"
+include $(shell find $(WORK_DIR) -type f -name '*.d')
 
-$(TEST_LUA_DL):
-	curl -LsSo "$(TEST_LUA_DL)" "$(TEST_LUA_URL)"
-
-$(TEST_JPEG_LIB): $(TEST_LUA_DIST_DIR) $(TEST_JPEG_DL)
-	rm -rf "$(TEST_JPEG_DIR)"
-	mkdir -p "$(dir $(TEST_JPEG_DIR))"
-	tar xf "$(TEST_JPEG_DL)" -C "$(dir $(TEST_JPEG_DIR))"
-	cd "$(TEST_JPEG_DIR)" && $(TEST_JPEG_CONFIGURE)
-	cd "$(TEST_JPEG_DIR)" && $(TEST_JPEG_MAKE)
-
-$(TEST_JPEG_DL):
-	curl -LsSo "$(TEST_JPEG_DL)" "$(TEST_JPEG_URL)"
-
-echo:
-	find $(TEST_DIR) -type f -name '*.d'
-
-include $(shell find $(TEST_DIR) -type f -name '*.d')
-
-.PHONY: echo build install luarocks-build luarocks-install upload clean test iterate luarocks-test luarocks-test-run
+.PHONY: build install upload clean test iterate luarocks-build luarocks-install luarocks-test luarocks-test-run

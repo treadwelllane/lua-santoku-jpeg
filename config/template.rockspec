@@ -51,14 +51,14 @@ test_dependencies = {
 build = {
   type = "make",
   install_target = "luarocks-install",
-  build_variables  =  {
+  build_variables = {
     CFLAGS = "$(CFLAGS)",
     LDFLAGS = "$(LDFLAGS)",
     LIBFLAG = "$(LIBFLAG)",
     LUA_INCDIR = "$(LUA_INCDIR)",
     LUA_LIBDIR = "$(LUA_LIBDIR)",
   },
-  install_variables  =  {
+  install_variables = {
     INST_LIBDIR = "$(LIBDIR)",
     INST_LUADIR = "$(LUADIR)",
   },
