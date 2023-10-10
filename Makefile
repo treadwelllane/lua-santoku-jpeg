@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.5-1
+VERSION ?= 0.0.6-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
@@ -124,6 +124,7 @@ $(LUA_DIST_DIR): $(LUA_DL)
 	cp "$(LUA_DIR)/src/"*.wasm "$(LUA_DIST_DIR)/bin/"
 
 $(LUA_DL):
+	mkdir -p "$(dir $(LUA_DL))"
 	curl -LsSo "$(LUA_DL)" "$(LUA_URL)"
 
 else
@@ -162,6 +163,7 @@ $(JPEG_LIB): $(JPEG_DL)
 	cd "$(JPEG_DIR)" && $(MAKE)
 
 $(JPEG_DL):
+	mkdir -p "$(dir $(LUA_DL))"
 	curl -LsSo "$(JPEG_DL)" "$(JPEG_URL)"
 
 endif
@@ -324,6 +326,6 @@ $(LUACOV_CFG): $(LUACOV_CFG_T)
 			-f "$(LUACOV_CFG_T)" \
 			-o "$(LUACOV_CFG)"
 
-include $(shell find $(WORK_DIR) -type f -name '*.d')
+include $(shell find $(WORK_DIR) -type f -name '*.d' 2>/dev/null)
 
 .PHONY: build install upload clean test iterate luarocks-build luarocks-install luarocks-test luarocks-test-run
