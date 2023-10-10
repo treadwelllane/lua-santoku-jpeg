@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.4-1
+VERSION ?= 0.0.5-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
@@ -234,7 +234,7 @@ build: $(DEPS) $(BUILD_C)
 install: $(DEPS)
 	$(LUAROCKS) make $(ROCKSPEC)
 
-upload: $(DEPS)
+upload: $(ROCKSPEC)
 	@if test -z "$(LUAROCKS_API_KEY)"; then echo "Missing LUAROCKS_API_KEY variable"; exit 1; fi
 	@if ! git diff --quiet; then echo "Commit your changes first"; exit 1; fi
 	git tag "$(VERSION)"
@@ -263,7 +263,7 @@ luarocks-test: install $(TESTED_FILES) $(LUACOV_CFG)
 		echo; \
 	fi
 
-luarocks-test-run: $(DEPS)
+luarocks-test-run: $(ROCKSPEC)
 	$(LUAROCKS) $(ARGS)
 
 # iterate: $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TEST_LUA_DIST_DIR) $(JPEG_LIB)
