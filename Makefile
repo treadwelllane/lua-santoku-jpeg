@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.2-1
+VERSION ?= 0.0.3-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
@@ -34,6 +34,9 @@ TOKU_BUNDLE ?= toku bundle -M -i debug -l luacov -l luacov.hook
 TOKU_TEST ?= toku test -s
 
 DEPS ?= $(ROCKSPEC)
+
+# Default to local libjpeg
+LOCAL_JPEG ?= 1
 
 ifneq ($(filter-out test luarocks-test-run, $(MAKECMDGOALS)), $(MAKECMDGOALS))
 LOCAL_LUAROCKS = 1
