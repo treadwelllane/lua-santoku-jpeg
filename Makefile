@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.6-1
+VERSION ?= 0.0.7-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
@@ -163,7 +163,7 @@ $(JPEG_LIB): $(JPEG_DL)
 	cd "$(JPEG_DIR)" && $(MAKE)
 
 $(JPEG_DL):
-	mkdir -p "$(dir $(LUA_DL))"
+	mkdir -p "$(dir $(JPEG_DL))"
 	curl -LsSo "$(JPEG_DL)" "$(JPEG_URL)"
 
 endif
