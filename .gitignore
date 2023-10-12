@@ -1,4 +1,3 @@
 build
 test.log
-test/spec/santoku/jpeg/image.smaller.co.jpg
-test/spec/santoku/jpeg/image.smaller.noco.jpg
+test/spec/santoku/jpeg/image.smaller.jpg

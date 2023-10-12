@@ -27,8 +27,8 @@ LUAROCKS ?= luarocks
 
 LIBFLAG ?= -shared
 
-LIB_CFLAGS ?= $(if $(LUA_INCDIR), -I$(LUA_INCDIR)) -Wall -O3
-LIB_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) $(LIBFLAG) -ljpeg -Wall -O3
+LIB_CFLAGS ?= $(if $(LUA_INCDIR), -I$(LUA_INCDIR)) -Wall
+LIB_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) $(LIBFLAG) -ljpeg -Wall
 
 TOKU_BUNDLE ?= toku bundle -M -i debug -l luacov -l luacov.hook
 TOKU_TEST ?= toku test -s
@@ -39,6 +39,7 @@ DEPS ?= $(ROCKSPEC)
 LOCAL_JPEG ?= 1
 
 CONFIGURE ?= ./configure
+MAKE_LUA ?= make
 
 ifneq ($(filter-out test luarocks-test-run, $(MAKECMDGOALS)), $(MAKECMDGOALS))
 LOCAL_LUAROCKS = 1
@@ -63,6 +64,9 @@ TOKU_TEST += -i node
 
 TEST_CFLAGS += -gsource-map
 TEST_LDFLAGS += -gsource-map
+
+LIB_CFLAGS += -gsource-map
+LIB_LDFLAGS += -gsource-map
 
 CC = emcc
 LD = emcc
@@ -121,7 +125,8 @@ $(LUA_DIST_DIR): $(LUA_DL)
 	tar xf "$(LUA_DL)" -C "$(dir $(LUA_DIR))"
 	cd "$(LUA_DIR)" && $(MAKE_LUA)
 	cd "$(LUA_DIR)" && $(MAKE_LUA) local
-	cp "$(LUA_DIR)/src/"*.wasm "$(LUA_DIST_DIR)/bin/"
+	[ "$(EMSCRIPTEN)" == "1" ] && \
+		cp "$(LUA_DIR)/src/"*.wasm "$(LUA_DIST_DIR)/bin/" || true
 
 $(LUA_DL):
 	mkdir -p "$(dir $(LUA_DL))"
@@ -149,6 +154,7 @@ TEST_CFLAGS += -I$(JPEG_DIR) $(JPEG_LIB)
 
 ifneq ($(EMSCRIPTEN),1)
 LIB_LDFLAGS += -Wl,-rpath,$(JPEG_DIR)/.libs
+CFLAGS += -fPIC
 endif
 
 TEST_LDFLAGS += -L$(JPEG_DIR)/.libs
@@ -184,8 +190,8 @@ TEST_SPEC_SRC_DIR ?= $(TEST_SRC_DIR)/spec
 TEST_SPEC_SRCS ?= $(shell find $(TEST_SPEC_SRC_DIR) -type f -name '*.lua')
 TEST_SPEC_DISTS ?= $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST_SPEC_SRCS))
 
-TEST_CFLAGS ?= -Wall -O3
-TEST_LDFLAGS ?= -Wall -O3
+TEST_CFLAGS ?= -Wall
+TEST_LDFLAGS ?= -Wall
 
 # TEST_LUA_VARS ?= $(TEST_VARS) CFLAGS="$(TEST_LUA_CFLAGS)" LDFLAGS="$(TEST_LUA_LDFLAGS)"
 # TEST_LUA_PATH ?= $(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?.lua;$(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?/init.lua
@@ -313,8 +319,8 @@ $(TEST_SPEC_DIST_DIR)/%.test: $(TEST_SPEC_SRC_DIR)/%.lua
 			-E LUACOV_CONFIG "$(LUACOV_CFG)" \
 			-e LUA_PATH "$(LUA_PATH)" \
 			-e LUA_CPATH "$(LUA_CPATH)" \
-			--cflags " $(CFLAGS)" \
-			--ldflags " $(LDFLAGS)" \
+			--cflags " $(TEST_CFLAGS) $(CFLAGS)" \
+			--ldflags " $(TEST_LDFLAGS) $(LDFLAGS)" \
 			-f "$<" -o "$(dir $@)" -O "$(notdir $@)" \
 
 $(LUACOV_CFG): $(LUACOV_CFG_T)
@@ -326,6 +332,6 @@ $(LUACOV_CFG): $(LUACOV_CFG_T)
 			-f "$(LUACOV_CFG_T)" \
 			-o "$(LUACOV_CFG)"
 
-include $(shell find $(WORK_DIR) -type f -name '*.d' 2>/dev/null)
+include $(shell find $(WORK_DIR) -type f -name '*.d')
 
 .PHONY: build install upload clean test iterate luarocks-build luarocks-install luarocks-test luarocks-test-run

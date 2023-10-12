@@ -8,6 +8,14 @@
 #include <setjmp.h>
 #include <stdlib.h>
 
+#define debug(...) \
+  printf("%s:%d\t", __FILE__, __LINE__); \
+  printf(__VA_ARGS__); \
+  printf("\n"); \
+  fflush(stderr);
+
+#define MTS "santoku_jpeg_scaler"
+
 int luaopen_santoku_jpeg (lua_State *);
 
 struct tk_jpeg_state;
@@ -28,21 +36,21 @@ typedef struct
 
 typedef enum
 {
-  TK_JPEG_STATE_VALUE_PULL = 1,
-  TK_JPEG_STATE_VALUE_PUSH = 2,
-  TK_JPEG_STATE_VALUE_TOTAL = 2
+  TK_JPEG_STATE_READ_HEADER,
+  TK_JPEG_STATE_START_DECOMPRESS,
+  TK_JPEG_STATE_PROCESS_BODY,
+  TK_JPEG_STATE_FINISH,
+  TK_JPEG_STATE_DONE,
 
-} TK_JPEG_STATE_VALUE;
+} TK_JPEG_STATE;
 
 typedef enum
 {
-  TK_JPEG_STATE_READ_HEADER,
-  TK_JPEG_STATE_START_DECOMPRESS,
-  TK_JPEG_STATE_START_COMPRESS,
-  TK_JPEG_STATE_PROCESS_BODY,
-  TK_JPEG_STATE_FINISH,
+  TK_JPEG_STATUS_WRITE,
+  TK_JPEG_STATUS_READ,
+  TK_JPEG_STATUS_DONE,
 
-} TK_JPEG_STATE;
+} TK_JPEG_STATUS;
 
 typedef struct tk_jpeg_state
 {
@@ -91,7 +99,7 @@ void tk_jpeg_comp_output_message (j_common_ptr jp)
   (*jp->err->format_message)(jp, buffer);
 
   lua_pushboolean(L, 0);
-  lua_pushstring(L, "compression error: ");
+  lua_pushstring(L, "Compression error: ");
   lua_pushstring(L, buffer);
   lua_concat(L, 2);
 
@@ -107,7 +115,7 @@ void tk_jpeg_decomp_output_message (j_common_ptr jp)
   (*jp->err->format_message)(jp, buffer);
 
   lua_pushboolean(L, 0);
-  lua_pushstring(L, "decompression error: ");
+  lua_pushstring(L, "Decompression error: ");
   lua_pushstring(L, buffer);
   lua_concat(L, 2);
 
@@ -134,6 +142,7 @@ void tk_jpeg_skip_input_data (j_decompress_ptr jp, long n)
 
   if (decomp->state->src.bytes_in_buffer < n) {
     decomp->state->src_skip += n - decomp->state->src.bytes_in_buffer;
+    decomp->state->src.next_input_byte = decomp->state->src_origin;
     decomp->state->src.bytes_in_buffer = 0;
   } else {
     decomp->state->src.next_input_byte += n;
@@ -174,90 +183,40 @@ void tk_jpeg_term_destination (j_compress_ptr jp)
 void tk_jpeg_destroy (tk_jpeg_state_t *state)
 {
   tk_jpeg_term_source(&state->decomp.decomp);
-  tk_jpeg_term_destination(&state->comp.comp);
   jpeg_destroy_decompress(&state->decomp.decomp);
-  jpeg_destroy_compress(&state->comp.comp);
+
+  if (state->state >= TK_JPEG_STATE_START_DECOMPRESS) {
+    tk_jpeg_term_destination(&state->comp.comp);
+    jpeg_destroy_compress(&state->comp.comp);
+  }
 }
 
-int tk_jpeg_loop (lua_State *);
-
-int tk_jpeg_push_data_cont (lua_State *L, int status, lua_KContext ctx)
-{
-  tk_jpeg_state_t *state = lua_touserdata(L, -1);
-
-  state->dest.next_output_byte = state->dest_origin;
-  state->dest.free_in_buffer = state->bufsize;
-
-  if (status == LUA_YIELD)
-    return tk_jpeg_loop(L);
-  else
-    return 0;
-}
-
-void tk_jpeg_push_data (lua_State *L)
+int tk_jpeg_emit (lua_State *L)
 {
   tk_jpeg_state_t *state = lua_touserdata(L, -1);
 
   state->dest_rows[0] = state->src_buffer[0];
-
   while (jpeg_write_scanlines(&state->comp.comp, state->dest_rows, 1) != 1);
 
   ptrdiff_t len = (void *)state->dest.next_output_byte - state->dest_origin;
 
   if (len > 0) {
-    lua_getiuservalue(L, -1, TK_JPEG_STATE_VALUE_PUSH);
+    lua_pushboolean(L, 1);
+    lua_pushinteger(L, TK_JPEG_STATUS_READ);
     lua_pushlstring(L, (char *)state->dest_origin, len);
-    lua_callk(L, 1, 0, 0, tk_jpeg_push_data_cont);
+    state->dest.next_output_byte = state->dest_origin;
+    state->dest.free_in_buffer = state->bufsize;
+    return 3;
+  } else {
+    lua_pushboolean(L, 1);
+    lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
+    return 2;
   }
-
-  tk_jpeg_push_data_cont(L, LUA_OK, 0);
 }
 
-int tk_jpeg_pull_data_cont (lua_State *L, int status, lua_KContext ctx)
+int tk_jpeg_mts_read (lua_State *L)
 {
-  tk_jpeg_state_t *state = lua_touserdata(L, -2);
-  luaL_checktype(L, -1, LUA_TSTRING);
-
-  size_t size;
-  const char *data = lua_tolstring(L, -1, &size);
-  lua_pop(L, 1);
-
-  if (state->src_skip > 0) {
-    assert(state->src.bytes_in_buffer == 0);
-    if (state->src_skip >= size) {
-      state->src_skip -= size;
-      return 0;
-    } else {
-      data += state->src_skip;
-      size -= state->src_skip;
-      state->src_skip = 0;
-    }
-  }
-
-  // TODO: check for overflow
-  // TODO: Use jpegs support for multiple
-  // buffers instead of this
-  memmove(state->src_origin, state->src.next_input_byte, state->src.bytes_in_buffer);
-  state->src.next_input_byte = state->src_origin;
-  memcpy((void *)state->src.next_input_byte + state->src.bytes_in_buffer, data, size);
-  state->src.bytes_in_buffer += size;
-
-  if (status == LUA_YIELD)
-    return tk_jpeg_loop(L);
-  else
-    return 0;
-}
-
-void tk_jpeg_pull_data (lua_State *L)
-{
-  lua_getiuservalue(L, -1, TK_JPEG_STATE_VALUE_PULL);
-  lua_callk(L, 0, 1, 0, tk_jpeg_pull_data_cont);
-  tk_jpeg_pull_data_cont(L, LUA_OK, 0);
-}
-
-int tk_jpeg_loop (lua_State *L)
-{
-  tk_jpeg_state_t *state = lua_touserdata(L, -1);
+  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -1, MTS);
 
   // TODO: Will this cause problems with lua's
   // coroutines?
@@ -266,31 +225,26 @@ int tk_jpeg_loop (lua_State *L)
     return 2;
   }
 
-  while (1)
-  {
+  while (1) {
     switch (state->state) {
 
       case TK_JPEG_STATE_READ_HEADER:
-
         if (jpeg_read_header(&state->decomp.decomp, 1) == JPEG_SUSPENDED) {
-          tk_jpeg_pull_data(L);
-          continue;
-        } else {
-          state->state = TK_JPEG_STATE_START_DECOMPRESS;
-          continue;
+          lua_pushboolean(L, 1);
+          lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
+          return 2;
         }
+
+        state->state = TK_JPEG_STATE_START_DECOMPRESS;
+        continue;
 
       case TK_JPEG_STATE_START_DECOMPRESS:
 
         if (jpeg_start_decompress(&state->decomp.decomp) == FALSE) {
-          tk_jpeg_pull_data(L);
-          continue;
-        } else {
-          state->state = TK_JPEG_STATE_START_COMPRESS;
-          continue;
+          lua_pushboolean(L, 1);
+          lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
+          return 2;
         }
-
-      case TK_JPEG_STATE_START_COMPRESS:
 
         state->comp.comp.image_width = state->decomp.decomp.output_width;
         state->comp.comp.image_height = state->decomp.decomp.output_height;
@@ -311,55 +265,92 @@ int tk_jpeg_loop (lua_State *L)
 
       case TK_JPEG_STATE_PROCESS_BODY:
 
-        if (state->decomp.decomp.output_scanline >= state->decomp.decomp.output_height) {
-          state->state = TK_JPEG_STATE_FINISH;
-          continue;
-        } else if (jpeg_read_scanlines(&state->decomp.decomp, state->src_buffer, 1)) {
-          tk_jpeg_push_data(L);
-          continue;
-        } else {
-          tk_jpeg_pull_data(L);
-          continue;
+        if (state->decomp.decomp.output_scanline < state->decomp.decomp.output_height) {
+          if (jpeg_read_scanlines(&state->decomp.decomp, state->src_buffer, 1) == 1) {
+            return tk_jpeg_emit(L);
+          } else {
+            lua_pushboolean(L, 1);
+            lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
+            return 2;
+          }
         }
+
+        state->state = TK_JPEG_STATE_FINISH;
+        continue;
 
       case TK_JPEG_STATE_FINISH:
 
         if (jpeg_finish_decompress(&state->decomp.decomp) == FALSE) {
-          tk_jpeg_pull_data(L);
-          continue;
+          lua_pushboolean(L, 1);
+          lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
+          return 2;
         } else {
           jpeg_finish_compress(&state->comp.comp);
           tk_jpeg_destroy(state);
-          lua_pop(L, 1);
           lua_pushboolean(L, 1);
-          return 1;
+          lua_pushinteger(L, TK_JPEG_STATUS_DONE);
+          state->state = TK_JPEG_STATE_DONE;
+          return 2;
         }
+
+      case TK_JPEG_STATE_DONE:
+
+        lua_pushboolean(L, 1);
+        lua_pushinteger(L, TK_JPEG_STATUS_DONE);
+        return 2;
 
     }
   }
 }
 
+int tk_jpeg_mts_write (lua_State *L)
+{
+  if (lua_gettop(L) != 2)
+    luaL_error(L, "expected 2 arguments to write");
+
+  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -2, MTS);
+
+  if (state->state == TK_JPEG_STATE_DONE)
+    luaL_error(L, "scaler is done");
+
+  luaL_checktype(L, -1, LUA_TSTRING);
+
+  size_t size;
+  const char *data = lua_tolstring(L, -1, &size);
+  lua_pop(L, 1);
+
+  if (state->src_skip > 0) {
+    assert(state->src.bytes_in_buffer == 0);
+    if (state->src_skip >= size) {
+      state->src_skip -= size;
+      goto end;
+    } else {
+      data += state->src_skip;
+      size -= state->src_skip;
+      state->src_skip = 0;
+    }
+  }
+
+  memmove(state->src_origin, state->src.next_input_byte, state->src.bytes_in_buffer);
+  state->src_origin = realloc(state->src_origin, state->src.bytes_in_buffer + size);
+  state->src.next_input_byte = state->src_origin;
+  memcpy((void *)state->src.next_input_byte + state->src.bytes_in_buffer, data, size);
+  state->src.bytes_in_buffer += size;
+
+end:
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 int tk_jpeg_mt_scale (lua_State *L)
 {
-  if (lua_gettop(L) != 6)
-    luaL_error(L, "expected 6 arguments");
+  if (lua_gettop(L) != 4)
+    luaL_error(L, "expected 4 arguments to scale");
 
-  int i_pull_data = lua_absindex(L, -6);
-  int i_push_data = lua_absindex(L, -5);
   int i_scale_num = lua_absindex(L, -4);
   int i_scale_denom = lua_absindex(L, -3);
   int i_scale_quality = lua_absindex(L, -2);
   int i_bufsize = lua_absindex(L, -1);
-
-  // function returning (string, #string) to get
-  // more data to decompress
-  if (lua_type(L, i_pull_data) != LUA_TTABLE)
-      luaL_checktype(L, i_pull_data, LUA_TFUNCTION);
-
-  // function accepting (string, #string) to use
-  // output data
-  if (lua_type(L, i_push_data) != LUA_TTABLE)
-      luaL_checktype(L, i_push_data, LUA_TFUNCTION);
 
   // scale fraction numerator
   luaL_checktype(L, i_scale_num, LUA_TNUMBER);
@@ -370,18 +361,13 @@ int tk_jpeg_mt_scale (lua_State *L)
   // scale quality
   luaL_checktype(L, i_scale_quality, LUA_TNUMBER);
 
-  // byte size of buffers (must be larger than
-  // 2K for good performance)
+  // scale quality
   luaL_checktype(L, i_bufsize, LUA_TNUMBER);
 
-  tk_jpeg_state_t *state = lua_newuserdatauv(L, sizeof(tk_jpeg_state_t), TK_JPEG_STATE_VALUE_TOTAL);
-  int i_state = lua_absindex(L, -1);
-
-  lua_pushvalue(L, i_pull_data);
-  lua_setiuservalue(L, i_state, TK_JPEG_STATE_VALUE_PULL);
-
-  lua_pushvalue(L, i_push_data);
-  lua_setiuservalue(L, i_state, TK_JPEG_STATE_VALUE_PUSH);
+  tk_jpeg_state_t *state = lua_newuserdatauv(L, sizeof(tk_jpeg_state_t), 1);
+  lua_pushvalue(L, lua_upvalueindex(1));
+  lua_setiuservalue(L, -2, 1);
+  luaL_setmetatable(L, MTS);
 
   state->state = TK_JPEG_STATE_READ_HEADER;
   state->L = L;
@@ -417,11 +403,28 @@ int tk_jpeg_mt_scale (lua_State *L)
   state->decomp_err.error_exit = &tk_jpeg_decomp_err_exit;
   state->decomp_err.output_message = &tk_jpeg_decomp_output_message;
 
-  lua_insert(L, -7);
-  lua_pop(L, 6);
+  lua_insert(L, -5);
+  lua_pop(L, 4);
 
-  return tk_jpeg_loop(L);
+  tk_jpeg_mts_read(L);
+  int t = lua_gettop(L);
+
+  if (lua_toboolean(L, -t + 1)) {
+    lua_remove(L, -t + 2);
+    lua_insert(L, -t + 1);
+  } else {
+    lua_remove(L, -t - 1);
+  }
+
+  return t - 1;
 }
+
+luaL_Reg tk_jpeg_mts_fns[] =
+{
+  { "write", tk_jpeg_mts_write },
+  { "read", tk_jpeg_mts_read },
+  { NULL, NULL }
+};
 
 luaL_Reg tk_jpeg_mt_fns[] =
 {
@@ -431,7 +434,25 @@ luaL_Reg tk_jpeg_mt_fns[] =
 
 int luaopen_santoku_jpeg (lua_State *L)
 {
-  lua_newtable(L);
-  luaL_setfuncs(L, tk_jpeg_mt_fns, 0);
+  lua_newtable(L); // mt
+  lua_pushvalue(L, -1); // mt mt
+  luaL_setfuncs(L, tk_jpeg_mt_fns, 1); // mt
+
+  lua_pushinteger(L, TK_JPEG_STATUS_WRITE); // mt tag
+  lua_setfield(L, -2, "WRITE"); // mt
+
+  lua_pushinteger(L, TK_JPEG_STATUS_READ); // mt tag
+  lua_setfield(L, -2, "READ"); // mt
+
+  lua_pushinteger(L, TK_JPEG_STATUS_DONE); // mt tag
+  lua_setfield(L, -2, "DONE"); // mt
+
+  luaL_newmetatable(L, MTS); // mt mts
+  lua_newtable(L); // mt mts idx
+  lua_pushvalue(L, -3); // mt mts idx mt
+  luaL_setfuncs(L, tk_jpeg_mts_fns, 1); // mt mts idx
+  lua_setfield(L, -2, "__index"); // mt mts
+  lua_pop(L, 1); // mt
+
   return 1;
 }
