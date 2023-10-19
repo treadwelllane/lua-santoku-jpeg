@@ -18,7 +18,11 @@ dependencies = {
 
 test_dependencies = {
 
-  "santoku >= 0.0.83-1",
+  "santoku >= 0.0.87-1",
+
+  <% template:push(os.getenv("EMSCRIPTEN") == "1") %>
+  "santoku-web >= 0.0.77-1",
+  <% template:pop() %>
 
   -- TODO: Should this be pulled in by santoku?
   -- It's an optional dependency that for our

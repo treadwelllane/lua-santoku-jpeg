@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.8-1
+VERSION ?= 0.0.9-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
@@ -33,7 +33,7 @@ LIB_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) $(LIBFLAG) -ljpeg -Wall
 TOKU_BUNDLE ?= toku bundle -M -i debug -l luacov -l luacov.hook
 TOKU_TEST ?= toku test -s
 
-DEPS ?= $(ROCKSPEC)
+DEPS ?= $(ROCKSPEC) $(BUILD_C) $(BUILD_LUA)
 
 # Default to local libjpeg
 LOCAL_JPEG ?= 1
@@ -60,9 +60,9 @@ endif
 BUILD_DIR := $(BUILD_DIR)/emscripten
 
 TOKU_BUNDLE += -C
-TOKU_TEST += -i node
+TOKU_TEST += -i 'node --expose-gc --trace-gc'
 
-TEST_CFLAGS += -gsource-map
+TEST_CFLAGS += -gsource-map --bind
 TEST_LDFLAGS += -gsource-map
 
 LIB_CFLAGS += -gsource-map
@@ -174,16 +174,6 @@ $(JPEG_DL):
 
 endif
 
-ifdef TEST
-
-TESTED_FILES := $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST))
-
-else
-
-TESTED_FILES = $(TEST_SPEC_DISTS)
-
-endif
-
 TEST_SPEC_DIST_DIR ?= $(TEST_DIR)/spec
 TEST_SPEC_SRC_DIR ?= $(TEST_SRC_DIR)/spec
 
@@ -193,9 +183,29 @@ TEST_SPEC_DISTS ?= $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/
 TEST_CFLAGS ?= -Wall
 TEST_LDFLAGS ?= -Wall
 
-# TEST_LUA_VARS ?= $(TEST_VARS) CFLAGS="$(TEST_LUA_CFLAGS)" LDFLAGS="$(TEST_LUA_LDFLAGS)"
-# TEST_LUA_PATH ?= $(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?.lua;$(TEST_LUAROCKS_TREE)/share/lua/$(TEST_LUA_MINMAJ)/?/init.lua
-# TEST_LUA_CPATH ?= $(TEST_LUAROCKS_TREE)/lib/lua/$(TEST_LUA_MINMAJ)/?.so
+ifdef TEST
+
+TESTED_FILES := $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(PWD)/$(TEST))
+
+# $(error "Test set: $(TESTED_FILES)")
+
+else
+
+TESTED_FILES = $(TEST_SPEC_DISTS)
+
+# $(error "Test unset: $(TESTED_FILES)")
+
+endif
+
+ifneq ($(EMSCRIPTEN),1)
+
+TEST_SPEC_DISTS := $(filter-out %/web.test, $(TEST_SPEC_DISTS))
+TESTED_FILES := $(filter-out %/web.test, $(TEST_SPEC_DISTS))
+
+endif
+
+TEST_LUA_PATH ?= $(WORK_DIR)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?/init.lua
+TEST_LUA_CPATH ?= $(WORK_DIR)/?.so;$(LUAROCKS_TREE)/lib/lua/$(LUA_MINMAJ)/?.so
 
 ifeq ($(LOCAL_LUAROCKS),1)
 
@@ -253,7 +263,7 @@ upload: $(ROCKSPEC)
 clean:
 	rm -rf build
 
-test: $(DEPS)
+test: $(DEPS) $(TEST_SPEC_DISTS)
 	$(LUAROCKS) test $(ROCKSPEC)
 
 luarocks-build: $(BUILD_C)
@@ -261,8 +271,8 @@ luarocks-build: $(BUILD_C)
 luarocks-install: $(INST_LUA) $(INST_C)
 
 # TODO: 'install' should be luarocks-install, but how to we set INST_LIB/BINDIR?
-luarocks-test: install $(TESTED_FILES) $(LUACOV_CFG)
-	@if SANITIZE="$(SANITIZE)" $(TOKU_TEST) $(TESTED_FILES); then \
+luarocks-test: $(DEPS) $(LUACOV_CFG) $(LUACHECK_CFG)
+	if SANITIZE="$(SANITIZE)" $(TOKU_TEST) $(TESTED_FILES); then \
 		luacov -c "$(LUACOV_CFG)"; \
 		cat "$(LUACOV_REPORT_FILE)" | \
 			awk '/^Summary/ { P = NR } P && NR > P + 1'; \
@@ -274,12 +284,12 @@ luarocks-test: install $(TESTED_FILES) $(LUACOV_CFG)
 luarocks-test-run: $(ROCKSPEC)
 	$(LUAROCKS) $(ARGS)
 
-# iterate: $(TEST_LUAROCKS_CFG) $(ROCKSPEC) $(TEST_LUA_DIST_DIR) $(JPEG_LIB)
-# 	@while true; do \
-# 		$(TEST_VARS) $(TEST_LUAROCKS) test $(ROCKSPEC); \
-# 		inotifywait -qqr -e close_write -e create -e delete -e delete \
-# 			Makefile $(SRC_DIR) $(CONFIG_DIR) $(TEST_SPEC_SRC_DIR); \
-# 	done
+iterate: $(ROCKSPEC)
+	@while true; do \
+		$(MAKE) $(MAKEFLAGS) test; \
+		inotifywait -qqr -e close_write -e create -e delete -e delete \
+			Makefile $(SRC_DIR) $(CONFIG_DIR) $(TEST_SPEC_SRC_DIR); \
+	done
 
 $(INST_LUADIR)/%.lua: $(SRC_DIR)/%.lua
 	@if test -z "$(INST_LUADIR)"; then echo "Missing INST_LUADIR variable"; exit 1; fi
@@ -302,6 +312,7 @@ $(ROCKSPEC): $(ROCKSPEC_T)
 	GIT_URL="$(GIT_URL)" \
 	HOMEPAGE="$(HOMEPAGE)" \
 	LICENSE="$(LICENSE)" \
+	EMSCRIPTEN="$(EMSCRIPTEN)" \
 		toku template \
 			-f "$(ROCKSPEC_T)" \
 			-o "$(ROCKSPEC)"
@@ -317,8 +328,8 @@ $(TEST_SPEC_DIST_DIR)/%.test: $(TEST_SPEC_SRC_DIR)/%.lua
 		$(TOKU_BUNDLE) \
 			-E SANITIZE "$(SANITIZE)" \
 			-E LUACOV_CONFIG "$(LUACOV_CFG)" \
-			-e LUA_PATH "$(LUA_PATH)" \
-			-e LUA_CPATH "$(LUA_CPATH)" \
+			-e LUA_PATH "$(TEST_LUA_PATH)" \
+			-e LUA_CPATH "$(TEST_LUA_CPATH)" \
 			--cflags " $(TEST_CFLAGS) $(CFLAGS)" \
 			--ldflags " $(TEST_LDFLAGS) $(LDFLAGS)" \
 			-f "$<" -o "$(dir $@)" -O "$(notdir $@)" \
