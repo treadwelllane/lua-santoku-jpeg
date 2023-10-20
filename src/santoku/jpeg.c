@@ -8,7 +8,8 @@
 #include <setjmp.h>
 #include <stdlib.h>
 
-#define debug(...) fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n");
+#define debug(...) \
+  fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n");
 
 #define MTS "santoku_jpeg_scaler"
 
@@ -20,6 +21,7 @@ typedef struct
 {
   struct jpeg_decompress_struct decomp;
   struct tk_jpeg_state *state;
+  size_t bufsize;
 
 } tk_jpeg_decompress_t;
 
@@ -27,6 +29,7 @@ typedef struct
 {
   struct jpeg_compress_struct comp;
   struct tk_jpeg_state *state;
+  size_t bufsize;
 
 } tk_jpeg_compress_t;
 
@@ -134,7 +137,7 @@ void tk_jpeg_init_source (j_decompress_ptr jp)
   tk_jpeg_decompress_t *decomp = (tk_jpeg_decompress_t *) jp;
 
   decomp->state->src.bytes_in_buffer = 0;
-  decomp->state->src_origin = malloc(decomp->state->bufsize);
+  decomp->state->src_origin = malloc(decomp->state->decomp.bufsize);
   decomp->state->src.next_input_byte = decomp->state->src_origin;
 }
 
@@ -167,12 +170,24 @@ void tk_jpeg_term_source (j_decompress_ptr jp)
   decomp->state->src_buffer[0] = NULL;
 }
 
+void tk_jpeg_extend_destination (tk_jpeg_compress_t *comp)
+{
+  size_t oldsize = comp->bufsize;
+  comp->bufsize = comp->bufsize * 1.5;
+
+  ptrdiff_t len = comp->state->dest.next_output_byte - (uint8_t *) comp->state->dest_origin;
+
+  comp->state->dest_origin = realloc(comp->state->dest_origin, comp->bufsize);
+  comp->state->dest.next_output_byte = comp->state->dest_origin + len;
+  comp->state->dest.free_in_buffer += comp->bufsize - oldsize;
+}
+
 void tk_jpeg_init_destination (j_compress_ptr jp)
 {
   tk_jpeg_compress_t *comp = (tk_jpeg_compress_t *) jp;
 
-  comp->state->dest.free_in_buffer = comp->state->bufsize;
-  comp->state->dest_origin = malloc(comp->state->bufsize);
+  comp->state->dest.free_in_buffer = comp->state->comp.bufsize;
+  comp->state->dest_origin = malloc(comp->state->comp.bufsize);
   comp->state->dest.next_output_byte = comp->state->dest_origin;
 }
 
@@ -260,7 +275,8 @@ int tk_jpeg_mts_read (lua_State *L)
 
           if (jpeg_read_scanlines(&state->decomp.decomp, (unsigned char **) state->src_buffer, 1) == 1) {
 
-            while (jpeg_write_scanlines(&state->comp.comp, (JSAMPARRAY) state->src_buffer, 1) != 1);
+            while (jpeg_write_scanlines(&state->comp.comp, (JSAMPARRAY) state->src_buffer, 1) != 1)
+              tk_jpeg_extend_destination(&state->comp);
             ptrdiff_t len = (void *)state->dest.next_output_byte - state->dest_origin;
 
             if (len > 0) {
@@ -268,7 +284,7 @@ int tk_jpeg_mts_read (lua_State *L)
               lua_pushinteger(L, TK_JPEG_STATUS_READ);
               lua_pushlstring(L, (char *)state->dest_origin, len);
               state->dest.next_output_byte = state->dest_origin;
-              state->dest.free_in_buffer = state->bufsize;
+              state->dest.free_in_buffer = state->comp.bufsize;
               return 3;
             } else {
               continue;
@@ -396,6 +412,7 @@ int tk_jpeg_mt_scale (lua_State *L)
   state->dest_origin = NULL;
 
   state->comp.state = state;
+  state->comp.bufsize = state->bufsize;
   state->comp.comp.err = jpeg_std_error(&state->comp_err);
   jpeg_create_compress(&state->comp.comp);
   state->comp.comp.dest = &state->dest;
@@ -405,6 +422,7 @@ int tk_jpeg_mt_scale (lua_State *L)
   state->comp_err.emit_message = &tk_jpeg_emit_message;
 
   state->decomp.state = state;
+  state->decomp.bufsize = state->bufsize;
   jpeg_create_decompress(&state->decomp.decomp);
   state->decomp.decomp.err = jpeg_std_error(&state->decomp_err);
   state->decomp.decomp.src = &state->src;
