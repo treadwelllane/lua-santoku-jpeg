@@ -1,5 +1,5 @@
 NAME ?= santoku-jpeg
-VERSION ?= 0.0.9-1
+VERSION ?= 0.0.10-1
 GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
 HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
 LICENSE ?= MIT
