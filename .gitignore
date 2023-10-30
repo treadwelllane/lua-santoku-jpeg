@@ -1,6 +1,8 @@
-build
-test.log
-test/spec/santoku/jpeg/image.smaller.jpg
-test/spec/santoku/jpeg/image2.smaller.jpg
-test/spec/santoku/jpeg/image3.smaller.jpg
-test/spec/santoku/jpeg/image4.smaller.jpg
+.build
+.old*
+.build.mk.d
+.build.mk
+test/res/image.smaller.jpg
+test/res/image2.smaller.jpg
+test/res/image3.smaller.jpg
+test/res/image4.smaller.jpg

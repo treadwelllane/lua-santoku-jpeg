@@ -1,74 +1,51 @@
-package = "<% return os.getenv('NAME') %>"
-version = "<% return os.getenv('VERSION') %>"
+<% vec = require("santoku.vector") %>
+<% str = require("santoku.string") %>
+
+package = "<% return name %>"
+version = "<% return version %>"
 rockspec_format = "3.0"
 
 source = {
-  url = "git+ssh://<% return os.getenv('GIT_URL') %>",
-  tag = "<% return os.getenv('VERSION') %>"
+  url = "<% return download %>",
 }
 
 description = {
-  homepage = "<% return os.getenv('HOMEPAGE') %>",
-  license = "<% return os.getenv('LICENSE') %>"
+  homepage = "<% return homepage %>",
+  license = "<% return license %>"
 }
 
 dependencies = {
-  "lua >= 5.1",
+  <% return vec.wrap(dependencies):map(str.quote):concat(",\n") %>
 }
 
 test_dependencies = {
-
-  "santoku >= 0.0.87-1",
-
-  <% template:push(os.getenv("EMSCRIPTEN") == "1") %>
-  "santoku-web >= 0.0.78-1",
-  <% template:pop() %>
-
-  -- TODO: Should this be pulled in by santoku?
-  -- It's an optional dependency that for our
-  -- purposes here is needed. The alernative is
-  -- to maintin luafilesystem as a separate dep
-  -- in this array, which isn't so bad.
-  "luafilesystem >= 1.8.0-1",
-
-  -- TODO: santoku cli should be a
-  -- globally-installed dev dependency checked
-  -- for via make
-  --
-  -- "santoku-cli >= 0.0.22-1",
-
-  "luassert >= 1.9.0-1",
-
-  -- TODO: temporarily using manually installed
-  -- broma0/luacov while PR pending:
-  --
-  -- https://github.com/lunarmodules/luacov/pull/102
-  "luacov >= 0.15.0",
-
-  -- TODO: luacheck should also be a
-  -- globally-installed dev dependency checked
-  -- for via make
-  -- "luacheck >= 1.1.0-1",
-
+  <% return vec.wrap(test_dependencies):map(str.quote):concat(",\n") %>
 }
 
 build = {
   type = "make",
-  install_target = "luarocks-install",
+  variables = {
+    LIB_EXTENSION = "$(LIB_EXTENSION)",
+  },
   build_variables = {
+    CC = "$(CC)",
     CFLAGS = "$(CFLAGS)",
-    LDFLAGS = "$(LDFLAGS)",
     LIBFLAG = "$(LIBFLAG)",
+    LUA_BINDIR = "$(LUA_BINDIR)",
     LUA_INCDIR = "$(LUA_INCDIR)",
     LUA_LIBDIR = "$(LUA_LIBDIR)",
+    LUA = "$(LUA)",
   },
   install_variables = {
+    INST_PREFIX = "$(PREFIX)",
+    INST_BINDIR = "$(BINDIR)",
     INST_LIBDIR = "$(LIBDIR)",
     INST_LUADIR = "$(LUADIR)",
-  },
+    INST_CONFDIR = "$(CONFDIR)",
+  }
 }
 
 test = {
   type = "command",
-  command = "make luarocks-test"
+  command = "make test"
 }
