@@ -1,348 +1,256 @@
-NAME ?= santoku-jpeg
-VERSION ?= 0.0.10-1
-GIT_URL ?= git@github.com:treadwelllane/lua-santoku-jpeg.git
-HOMEPAGE ?= https://github.com/treadwelllane/lua-santoku-jpeg
-LICENSE ?= MIT
 
-BUILD_DIR ?= $(PWD)/build
-WORK_DIR ?= $(BUILD_DIR)/work
-TEST_DIR ?= $(BUILD_DIR)/test
-CONFIG_DIR ?= $(PWD)/config
-SRC_DIR ?= $(PWD)/src
-TEST_SRC_DIR ?= $(PWD)/test
 
-SRC_LUA ?= $(shell find $(SRC_DIR) -name '*.lua')
-SRC_C ?= $(shell find $(SRC_DIR) -name '*.c')
+all:
 
-BUILD_LUA ?= $(patsubst $(SRC_DIR)/%.lua, $(WORK_DIR)/%.lua, $(SRC_LUA))
-BUILD_C ?= $(patsubst $(SRC_DIR)/%.c, $(WORK_DIR)/%.so, $(SRC_C))
+-include config.mk
 
-INST_LUA ?= $(patsubst $(SRC_DIR)/%.lua, $(INST_LUADIR)/%.lua, $(SRC_LUA))
-INST_C ?= $(patsubst $(SRC_DIR)/%.c, $(INST_LIBDIR)/%.so, $(SRC_C))
+export ROOT_DIR = $(PWD)
+export BUILD_BASE_DIR = $(ROOT_DIR)/.build
+export PREAMBLE = $(BUILD_BASE_DIR)/preamble.mk
 
-ROCKSPEC ?= $(WORK_DIR)/$(NAME)-$(VERSION).rockspec
-ROCKSPEC_T ?= $(CONFIG_DIR)/template.rockspec
+include $(PREAMBLE)
 
+ifndef $(VPFX)_ENV
+export $(VPFX)_ENV = default
+endif
+
+# NOTE: This allows callers to override install location
 LUAROCKS ?= luarocks
 
-LIBFLAG ?= -shared
-
-LIB_CFLAGS ?= $(if $(LUA_INCDIR), -I$(LUA_INCDIR)) -Wall
-LIB_LDFLAGS ?= $(if $(LUA_LIBDIR), -L$(LUA_LIBDIR)) $(LIBFLAG) -ljpeg -Wall
-
-TOKU_BUNDLE ?= toku bundle -M -i debug -l luacov -l luacov.hook
-TOKU_TEST ?= toku test -s
-
-DEPS ?= $(ROCKSPEC) $(BUILD_C) $(BUILD_LUA)
-
-# Default to local libjpeg
-LOCAL_JPEG ?= 1
-
-CONFIGURE ?= ./configure
-MAKE_LUA ?= make
-
-ifneq ($(filter-out test luarocks-test-run, $(MAKECMDGOALS)), $(MAKECMDGOALS))
-LOCAL_LUAROCKS = 1
-LOCAL_JPEG = 1
-endif
-
-ifeq ($(EMSCRIPTEN),1)
-
-ifneq ($(SANITIZE),0)
-SANITIZER_FLAGS ?= -fsanitize=address -fsanitize=undefined -fsanitize-address-use-after-return=always -fsanitize-address-use-after-scope
-SANITIZER_VARS ?= ASAN_SYMBOLIZER_PATH="$(shell which llvm-symbolizer)"
-TEST_CFLAGS := $(SANITIZER_FLAGS) $(TEST_CFLAGS)
-TEST_LDFLAGS := $(SANITIZER_FLAGS) $(TEST_LDFLAGS)
-LIB_CFLAGS := $(SANITIZER_FLAGS) $(TEST_CFLAGS)
-LIB_LDFLAGS := $(SANITIZER_FLAGS) $(TEST_LDFLAGS)
-endif
-
-BUILD_DIR := $(BUILD_DIR)/emscripten
-
-TOKU_BUNDLE += -C
-TOKU_TEST += -i 'node --expose-gc --trace-gc'
-
-TEST_CFLAGS += -gsource-map --bind
-TEST_LDFLAGS += -gsource-map
-
-LIB_CFLAGS += -gsource-map
-LIB_LDFLAGS += -gsource-map
-
-CC = emcc
-LD = emcc
-AR = emar
-AR_LUA = emar rcu
-NM = emnm
-RANLIB = emranlib
-
-LDFLAGS += -sALLOW_MEMORY_GROWTH -lnodefs.js -lnoderawfs.js
-
-# Annoying that this is necessary for separate
-# AR definition for compiling lua
-EM_VARS_LUA = CC="$(CC)" LD="$(CC)" AR="$(AR_LUA)" NM="$(NM)" RANLIB="$(RANLIB)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
-EM_VARS = CC="$(CC)" LD="$(CC)" AR="$(AR)" NM="$(NM)" RANLIB="$(RANLIB)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
-MAKE = emmake make $(EM_VARS)
-MAKE_LUA = emmake make $(EM_VARS_LUA)
-
-CONFIGURE = emconfigure ./configure
-
-LIB_CFLAGS += --bind
-
-LOCAL_LUA = 1
-LOCAL_JPEG = 1
-
-endif
-
-ifeq ($(LOCAL_LUA),1)
-
-LUA_VERSION ?= 5.4.4
-LUA_MINMAJ ?= $(shell echo $(LUA_VERSION) | grep -o ".\..")
-LUA_ARCHIVE ?= lua-$(LUA_VERSION).tar.gz
-LUA_DL ?= $(WORK_DIR)/$(LUA_ARCHIVE)
-LUA_DIR ?= $(WORK_DIR)/lua-$(LUA_VERSION)
-LUA_URL ?= https://www.lua.org/ftp/$(LUA_ARCHIVE)
-LUA_DIST_DIR ?= $(LUA_DIR)/install
-LUA_INC_DIR ?= $(LUA_DIST_DIR)/include
-LUA_LIB_DIR ?= $(LUA_DIST_DIR)/lib
-LUA_LIB ?= $(LUA_DIST_DIR)/lib/liblua.a
-LUA_INTERP ?= $(LUA_DIST_DIR)/bin/lua
-
-LUA_INCDIR = $(LUA_INC_DIR)
-LUA_LIBDIR = $(LUA_LIB_DIR)
-
-CFLAGS += -I$(LUA_INC_DIR)
-LDFLAGS += -L$(LUA_LIB_DIR)
-LIB_CFLAGS += -I$(LUA_INC_DIR)
-LIB_LDFLAGS += -L$(LUA_LIB_DIR)
-TEST_CFLAGS += -I$(LUA_INC_DIR)
-TEST_LDFLAGS += -L$(LUA_LIB_DIR)
-
-DEPS += $(LUA_DIST_DIR)
-
-$(LUA_DIST_DIR): $(LUA_DL)
-	# rm -rf "$(LUA_DIR)"
-	mkdir -p "$(dir $(LUA_DIR))"
-	tar xf "$(LUA_DL)" -C "$(dir $(LUA_DIR))"
-	cd "$(LUA_DIR)" && $(MAKE_LUA)
-	cd "$(LUA_DIR)" && $(MAKE_LUA) local
-	[ "$(EMSCRIPTEN)" == "1" ] && \
-		cp "$(LUA_DIR)/src/"*.wasm "$(LUA_DIST_DIR)/bin/" || true
-
-$(LUA_DL):
-	mkdir -p "$(dir $(LUA_DL))"
-	curl -LsSo "$(LUA_DL)" "$(LUA_URL)"
-
+ifdef $(VPFX)_WASM
+export $(VPFX)_WASM
+export CLIENT_VARS = CC="emcc" CXX="em++" AR="emar" LD="emcc" NM="llvm-nm" LDSHARED="emcc" RANLIB="emranlib"
+export BUILD_DIR = $(BUILD_BASE_DIR)/$($(VPFX)_ENV)-wasm
+export CC = emcc
+export CXX = em++
+export AR = emar
+export NM = llvm-nm
+export LDSHARED = emcc
+export RANLIB = emranlib
 else
-
-# TODO: Should this check use luarocks instead?
-LUA_MINMAJ ?= $(shell lua -v | grep -Po 'Lua\s*\K\d+\.\d+')
-
+export BUILD_DIR = $(BUILD_BASE_DIR)/$($(VPFX)_ENV)
 endif
 
-ifeq ($(LOCAL_JPEG),1)
+TOKU_TEMPLATE = BUILD_DIR="$(BUILD_DIR)" toku template -M -c $(ROOT_DIR)/config.lua
+export TOKU_TEMPLATE_TEST = TEST=1 $(TOKU_TEMPLATE)
+ROCKSPEC = $(BUILD_DIR)/$(NAME)-$(VERSION).rockspec
 
-JPEG_VERSION ?= 9e
-JPEG_URL ?= https://ijg.org/files/jpegsrc.v$(JPEG_VERSION).tar.gz
-JPEG_ARCHIVE ?= jpegsrc.v$(JPEG_VERSION).tar.gz
-JPEG_DL ?= $(WORK_DIR)/$(JPEG_ARCHIVE)
-JPEG_DIR ?= $(WORK_DIR)/jpeg-$(JPEG_VERSION)
-JPEG_LIB ?= $(JPEG_DIR)/.libs/libjpeg.a
+LIB = $(shell find lib -type f 2>/dev/null)
+BIN = $(shell find bin -type f 2>/dev/null)
+TEST_SPEC = $(shell find test/spec -type f 2>/dev/null)
+TEST_OTHER = $(filter-out $(TEST_SPEC), $(shell find test -type f 2>/dev/null))
+RES = $(shell find res -type f 2>/dev/null)
+DEPS = $(shell find deps -type f 2>/dev/null)
 
-LIB_CFLAGS += -I$(JPEG_DIR)
-LIB_LDFLAGS += -L$(JPEG_DIR)/.libs
-TEST_CFLAGS += -I$(JPEG_DIR) $(JPEG_LIB)
+LUAROCKS_MK = $(BUILD_DIR)/Makefile
 
-ifneq ($(EMSCRIPTEN),1)
-LIB_LDFLAGS += -Wl,-rpath,$(JPEG_DIR)/.libs
-CFLAGS += -fPIC
+ifneq ($(LIB),)
+LIB_MK = $(BUILD_DIR)/lib/Makefile
 endif
 
-TEST_LDFLAGS += -L$(JPEG_DIR)/.libs
-
-DEPS += $(JPEG_LIB)
-
-$(JPEG_LIB): $(JPEG_DL)
-	# rm -rf "$(JPEG_DIR)"
-	mkdir -p "$(dir $(JPEG_DIR))"
-	tar xf "$(JPEG_DL)" -C "$(dir $(JPEG_DIR))"
-	cd "$(JPEG_DIR)" && $(CONFIGURE)
-	cd "$(JPEG_DIR)" && $(MAKE)
-
-$(JPEG_DL):
-	mkdir -p "$(dir $(JPEG_DL))"
-	curl -LsSo "$(JPEG_DL)" "$(JPEG_URL)"
-
+ifneq ($(BIN),)
+BIN_MK = $(BUILD_DIR)/bin/Makefile
 endif
 
-TEST_SPEC_DIST_DIR ?= $(TEST_DIR)/spec
-TEST_SPEC_SRC_DIR ?= $(TEST_SRC_DIR)/spec
+TEST_LIB_MK = $(BUILD_DIR)/test/lib/Makefile
+TEST_BIN_MK = $(BUILD_DIR)/test/bin/Makefile
+TEST_ROCKSPEC = $(BUILD_DIR)/test/$(NAME)-$(VERSION).rockspec
+export TEST_LUAROCKS = LUAROCKS_CONFIG=$(TEST_LUAROCKS_CFG) luarocks
+TEST_LUAROCKS_CFG = $(BUILD_DIR)/test/luarocks.lua
+TEST_LUAROCKS_MK = $(BUILD_DIR)/test/Makefile
+TEST_ENV = $(BUILD_DIR)/test/lua.env
+export TEST_LUACOV_CFG = $(BUILD_DIR)/test/luacov.lua
+export TEST_LUACOV_STATS_FILE = $(BUILD_DIR)/test/luacov.stats.out
+export TEST_LUACOV_REPORT_FILE = $(BUILD_DIR)/test/luacov.report.out
+TEST_LUACHECK_CFG = $(BUILD_DIR)/test/luacheck.lua
 
-TEST_SPEC_SRCS ?= $(shell find $(TEST_SPEC_SRC_DIR) -type f -name '*.lua')
-TEST_SPEC_DISTS ?= $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(TEST_SPEC_SRCS))
+PREAMBLE_DATA = ZXhwb3J0IE5BTUUgPSA8JSByZXR1cm4gbmFtZSAlPgpleHBvcnQgVkVSU0lPTiA9IDwlIHJldHVybiB2ZXJzaW9uICU+CmV4cG9ydCBWUEZYID0gPCUgcmV0dXJuIHZhcmlhYmxlX3ByZWZpeCAlPgpleHBvcnQgJChWUEZYKV9QVUJMSUMgPSA8JSByZXR1cm4gcHVibGljIGFuZCAiMSIgb3IgIjAiICU+Cg==
+ROCKSPEC_DATA = PCUgdmVjID0gcmVxdWlyZSgic2FudG9rdS52ZWN0b3IiKSAlPgo8JSBzdHIgPSByZXF1aXJlKCJzYW50b2t1LnN0cmluZyIpICU+CgpwYWNrYWdlID0gIjwlIHJldHVybiBuYW1lICU+Igp2ZXJzaW9uID0gIjwlIHJldHVybiB2ZXJzaW9uICU+Igpyb2Nrc3BlY19mb3JtYXQgPSAiMy4wIgoKc291cmNlID0gewogIHVybCA9ICI8JSByZXR1cm4gZG93bmxvYWQgJT4iLAp9CgpkZXNjcmlwdGlvbiA9IHsKICBob21lcGFnZSA9ICI8JSByZXR1cm4gaG9tZXBhZ2UgJT4iLAogIGxpY2Vuc2UgPSAiPCUgcmV0dXJuIGxpY2Vuc2Ugb3IgJ1VOTElDRU5TRUQnICU+Igp9CgpkZXBlbmRlbmNpZXMgPSB7CiAgPCUgcmV0dXJuIHZlYy53cmFwKGRlcGVuZGVuY2llcyBvciB7fSk6bWFwKHN0ci5xdW90ZSk6Y29uY2F0KCIsXG4iKSAlPgp9CgpidWlsZCA9IHsKICB0eXBlID0gIm1ha2UiLAogIG1ha2VmaWxlID0gIk1ha2VmaWxlIiwKICB2YXJpYWJsZXMgPSB7CiAgICBMSUJfRVhURU5TSU9OID0gIiQoTElCX0VYVEVOU0lPTikiLAogIH0sCiAgYnVpbGRfdmFyaWFibGVzID0gewogICAgQ0MgPSAiJChDQykiLAogICAgQ0ZMQUdTID0gIiQoQ0ZMQUdTKSIsCiAgICBMSUJGTEFHID0gIiQoTElCRkxBRykiLAogICAgTFVBX0JJTkRJUiA9ICIkKExVQV9CSU5ESVIpIiwKICAgIExVQV9JTkNESVIgPSAiJChMVUFfSU5DRElSKSIsCiAgICBMVUFfTElCRElSID0gIiQoTFVBX0xJQkRJUikiLAogICAgTFVBID0gIiQoTFVBKSIsCiAgfSwKICBpbnN0YWxsX3ZhcmlhYmxlcyA9IHsKICAgIElOU1RfUFJFRklYID0gIiQoUFJFRklYKSIsCiAgICBJTlNUX0JJTkRJUiA9ICIkKEJJTkRJUikiLAogICAgSU5TVF9MSUJESVIgPSAiJChMSUJESVIpIiwKICAgIElOU1RfTFVBRElSID0gIiQoTFVBRElSKSIsCiAgICBJTlNUX0NPTkZESVIgPSAiJChDT05GRElSKSIsCiAgfQp9Cgo8JSB0ZW1wbGF0ZTpwdXNoKG9zLmdldGVudigiVEVTVCIpID09ICIxIikgJT4KCnRlc3RfZGVwZW5kZW5jaWVzID0gewogIDwlIHJldHVybiB2ZWMud3JhcCh0ZXN0X2RlcGVuZGVuY2llcyBvciB7fSk6bWFwKHN0ci5xdW90ZSk6Y29uY2F0KCIsXG4iKSAlPgp9Cgp0ZXN0ID0gewogIHR5cGUgPSAiY29tbWFuZCIsCiAgY29tbWFuZCA9ICJtYWtlIHRlc3QiCn0KCjwlIHRlbXBsYXRlOnBvcCgpICU+Cg==
 
-TEST_CFLAGS ?= -Wall
-TEST_LDFLAGS ?= -Wall
+LUAROCKS_MK_DATA = ZXhwb3J0IFZQRlggPSA8JSByZXR1cm4gdmFyaWFibGVfcHJlZml4ICU+CgpERVBTX0RJUlMgPSAkKHNoZWxsIGZpbmQgZGVwcy8qIC1tYXhkZXB0aCAwIC10eXBlIGQgMj4vZGV2L251bGwpCkRFUFNfUkVTVUxUUyA9ICQoYWRkc3VmZml4IC9yZXN1bHRzLm1rLCAkKERFUFNfRElSUykpCgppbmNsdWRlICQoREVQU19SRVNVTFRTKQoKYWxsOiAkKERFUFNfUkVTVUxUUykgJChURVNUX1JVTl9TSCkKCUBpZiBbIC1kIGxpYiBdOyB0aGVuICQoTUFLRSkgLUMgbGliIFBBUkVOVF9ERVBTX1JFU1VMVFM9IiQoREVQU19SRVNVTFRTKSI7IGZpCglAaWYgWyAtZCBiaW4gXTsgdGhlbiAkKE1BS0UpIC1DIGJpbiBQQVJFTlRfREVQU19SRVNVTFRTPSIkKERFUFNfUkVTVUxUUykiOyBmaQoKaW5zdGFsbDogYWxsCglAaWYgWyAtZCBsaWIgXTsgdGhlbiAkKE1BS0UpIC1DIGxpYiBpbnN0YWxsOyBmaQoJQGlmIFsgLWQgYmluIF07IHRoZW4gJChNQUtFKSAtQyBiaW4gaW5zdGFsbDsgZmkKCjwlIHRlbXBsYXRlOnB1c2gob3MuZ2V0ZW52KCJURVNUIikgPT0gIjEiKSAlPgoKVEVTVF9SVU5fU0ggPSBydW4uc2gKCnRlc3Q6ICQoVEVTVF9SVU5fU0gpICQoV0FTTV9URVNUUykKCXNoICQoVEVTVF9SVU5fU0gpCgokKFRFU1RfUlVOX1NIKTogJChQUkVBTUJMRSkKCUBlY2hvICJHZW5lcmF0aW5nICckQCciCglAc2ggLWMgJ2VjaG8gJChURVNUX1JVTl9TSF9EQVRBKSB8IGJhc2U2NCAtZCB8ICQoVE9LVV9URU1QTEFURV9URVNUKSAtZiAtIC1vICIkQCInCgokKEJVSUxEX0RJUikvdGVzdC9zcGVjLWJ1bmRsZWQvJTogJChCVUlMRF9ESVIpL3Rlc3Qvc3BlYy8lLmx1YQoJZWNobyAiQnVuZGxpbmcgJyQ8JyAtPiAnJChwYXRzdWJzdCAlLmx1YSwlLCAkPCknIgoJbWtkaXIgLXAgIiQocGF0c3Vic3QgJChCVUlMRF9ESVIpL3Rlc3Qvc3BlYy8lLCQoQlVJTERfRElSKS90ZXN0L3NwZWMtYnVuZGxlci8lLCAkKGRpciAkPCkpIgoJJChDTElFTlRfVkFSUykgdG9rdSBidW5kbGUgXAoJCS0tZW52ICQoVlBGWClfU0FOSVRJWkUgIiQoJChWUEZYKV9TQU5JVElaRSkiIFwKCQktLWVudiBMVUFDT1ZfQ09ORklHICIkKFRFU1RfTFVBQ09WX0NGRykiIFwKCQktLXBhdGggIiQoc2hlbGwgJChURVNUX0xVQVJPQ0tTKSBwYXRoIC0tbHItcGF0aCkiIFwKCQktLWNwYXRoICIkKHNoZWxsICQoVEVTVF9MVUFST0NLUykgcGF0aCAtLWxyLWNwYXRoKSIgXAoJCS0tbW9kIGx1YWNvdiBcCgkJLS1tb2QgbHVhY292Lmhvb2sgXAoJCS0taWdub3JlIGRlYnVnIFwKCQktLWNjIGVtY2MgXAoJCS0tZmxhZ3MgIiAtc0FTU0VSVElPTlMgLXNTSU5HTEVfRklMRSAtc0FMTE9XX01FTU9SWV9HUk9XVEggLXNFWElUX1JVTlRJTUU9MSAtbG5vZGVmcy5qcyAtbG5vZGVyYXdmcy5qcyIgXAoJCS0tZmxhZ3MgIiAkKExJQl9DRkxBR1MpICQoTElCX0xERkxBR1MpIiBcCgkJLS1mbGFncyAiIC1JICQoQ0xJRU5UX0xVQV9ESVIpL2luY2x1ZGUiIFwKCQktLWZsYWdzICIgLUwgJChDTElFTlRfTFVBX0RJUikvbGliIiBcCgkJLS1mbGFncyAiIC1sIGx1YSIgXAoJCS0tZmxhZ3MgIiAtbCBtIiBcCgkJLS1pbnB1dCAiJDwiIFwKCQktLW91dHB1dC1kaXJlY3RvcnkgIiQocGF0c3Vic3QgJChCVUlMRF9ESVIpL3Rlc3Qvc3BlYy8lLCQoQlVJTERfRElSKS90ZXN0L3NwZWMtYnVuZGxlci8lLCAkKGRpciAkPCkpIiBcCgkJLS1vdXRwdXQtcHJlZml4ICIkKG5vdGRpciAkKHBhdHN1YnN0ICUubHVhLCUsICQ8KSkiCgllY2hvICJDb3B5aW5nICckKHBhdHN1YnN0ICUubHVhLCUsICQ8KScgLT4gJyRAJyIKCW1rZGlyIC1wICIkKGRpciAkQCkiCgljcCAiJChwYXRzdWJzdCAkKEJVSUxEX0RJUikvdGVzdC9zcGVjLyUubHVhLCQoQlVJTERfRElSKS90ZXN0L3NwZWMtYnVuZGxlci8lLCAkPCkiICIkQCIKCgouUEhPTlk6IHRlc3QKCjwlIHRlbXBsYXRlOnBvcCgpICU+CgpkZXBzLyUvcmVzdWx0cy5tazogZGVwcy8lL01ha2VmaWxlCglAJChNQUtFKSAtQyAiJChkaXIgJEApIgoKLlBIT05ZOiBhbGwgaW5zdGFsbAo=
 
-ifdef TEST
+LIB_MK_DATA = ZXhwb3J0IFZQRlggPSA8JSByZXR1cm4gdmFyaWFibGVfcHJlZml4ICU+CgppbmNsdWRlICQoYWRkcHJlZml4IC4uLywgJChQQVJFTlRfREVQU19SRVNVTFRTKSkKCkxJQl9MVUEgPSAkKHNoZWxsIGZpbmQgKiAtbmFtZSAnKi5sdWEnKQpMSUJfQyA9ICQoc2hlbGwgZmluZCAqIC1uYW1lICcqLmMnKQpMSUJfTyA9ICQoTElCX0M6LmM9Lm8pCkxJQl9TTyA9ICQoTElCX086Lm89LiQoTElCX0VYVEVOU0lPTikpCgpJTlNUX0xVQSA9ICQoYWRkcHJlZml4ICQoSU5TVF9MVUFESVIpLywgJChMSUJfTFVBKSkKSU5TVF9TTyA9ICQoYWRkcHJlZml4ICQoSU5TVF9MSUJESVIpLywgJChMSUJfU08pKQoKTElCX0NGTEFHUyArPSAtV2FsbCAkKGFkZHByZWZpeCAtSSwgJChMVUFfSU5DRElSKSkKTElCX0xERkxBR1MgKz0gLVdhbGwgJChhZGRwcmVmaXggLUwsICQoTFVBX0xJQkRJUikpCgo8JSB0ZW1wbGF0ZTpwdXNoKG9zLmdldGVudigiVEVTVCIpID09ICIxIikgJT4KCmlmZXEgKCQoJChWUEZYKV9TQU5JVElaRSksMSkKTElCX0NGTEFHUyA6PSAtZnNhbml0aXplPWFkZHJlc3MgLWZzYW5pdGl6ZT1sZWFrICQoTElCX0NGTEFHUykKTElCX0xERkxBR1MgOj0gLWZzYW5pdGl6ZT1hZGRyZXNzIC1mc2FuaXRpemU9bGVhayAkKExJQl9MREZMQUdTKQplbmRpZgoKPCUgdGVtcGxhdGU6cG9wKCkgJT4KCmFsbDogJChMSUJfTykgJChMSUJfU08pCgolLm86ICUuYwoJJChDQykgJChMSUJfQ0ZMQUdTKSAkKENGTEFHUykgLWMgLW8gJEAgJDwKCiUuJChMSUJfRVhURU5TSU9OKTogJS5vCgkkKENDKSAkKENGTEFHUykgJChMSUJfTERGTEFHUykgJChMREZMQUdTKSAkKExJQkZMQUcpIC1vICRAICQ8CgppbnN0YWxsOiAkKElOU1RfTFVBKSAkKElOU1RfU08pCgokKElOU1RfTFVBRElSKS8lLmx1YTogLi8lLmx1YQoJbWtkaXIgLXAgJChkaXIgJEApCgljcCAkPCAkQAoKJChJTlNUX0xJQkRJUikvJS4kKExJQl9FWFRFTlNJT04pOiAuLyUuJChMSUJfRVhURU5TSU9OKQoJbWtkaXIgLXAgJChkaXIgJEApCgljcCAkPCAkQAoKLlBIT05ZOiBhbGwgaW5zdGFsbAo=
+BIN_MK_DATA = ZXhwb3J0IFZQRlggPSA8JSByZXR1cm4gdmFyaWFibGVfcHJlZml4ICU+CgppbmNsdWRlICQoYWRkcHJlZml4IC4uLywgJChQQVJFTlRfREVQU19SRVNVTFRTKSkKCkJJTl9MVUEgPSAkKHNoZWxsIGZpbmQgKiAtbmFtZSAnKi5sdWEnKQoKSU5TVF9MVUEgPSAkKHBhdHN1YnN0ICUubHVhLCQoSU5TVF9CSU5ESVIpLyUsICQoQklOX0xVQSkpCgphbGw6CglAIyBOb3RoaW5nIHRvIGRvIGhlcmUKCmluc3RhbGw6ICQoSU5TVF9MVUEpCgokKElOU1RfQklORElSKS8lOiAuLyUubHVhCglta2RpciAtcCAkKGRpciAkQCkKCWNwICQ8ICRACgouUEhPTlk6IGFsbCBpbnN0YWxsCg==
 
-TESTED_FILES := $(patsubst $(TEST_SPEC_SRC_DIR)/%.lua, $(TEST_SPEC_DIST_DIR)/%.test, $(PWD)/$(TEST))
+TEST_LUAROCKS_CFG_DATA = PCUKCnJvY2tzX3Jvb3QgPSBvcy5nZXRlbnYoIlRFU1QiKSA9PSAiMSIKICBhbmQgb3MuZ2V0ZW52KCJCVUlMRF9ESVIiKSAuLiAiL3Rlc3QvbHVhX21vZHVsZXMiCiAgb3Igb3MuZ2V0ZW52KCJCVUlMRF9ESVIiKSAuLiAiL2x1YV9tb2R1bGVzIgoKaXNfd2FzbSA9IG9zLmdldGVudih2YXJpYWJsZV9wcmVmaXggLi4gIl9XQVNNIikgPT0gIjEiCgolPgoKcm9ja3NfdHJlZXMgPSB7CiAgeyBuYW1lID0gInN5c3RlbSIsCiAgICByb290ID0gIjwlIHJldHVybiByb2Nrc19yb290ICU+IgogIH0gfQoKPCUgdGVtcGxhdGU6cHVzaChpc193YXNtKSAlPgoKLS0gbHVhX2ludGVycHJldGVyID0gImx1YSIKLS0gbHVhX3ZlcnNpb24gPSAiNS4xIgoKdmFyaWFibGVzID0gewoKICAtLSBMVUEgPSAiPCUgcmV0dXJuIG9zLmdldGVudignQ0xJRU5UX0xVQV9ESVInKSAlPi9iaW4vbHVhIiwKICBMVUFMSUIgPSAibGlibHVhLmEiLAogIC0tIExVQV9CSU5ESVIgPSAiPCUgcmV0dXJuIG9zLmdldGVudignQ0xJRU5UX0xVQV9ESVInKSAlPi9iaW4iLAogIC0tIExVQV9ESVIgPSAiPCUgcmV0dXJuIG9zLmdldGVudignQ0xJRU5UX0xVQV9ESVInKSAlPiIsCiAgTFVBX0lOQ0RJUiA9ICI8JSByZXR1cm4gb3MuZ2V0ZW52KCdDTElFTlRfTFVBX0RJUicpICU+L2luY2x1ZGUiLAogIExVQV9MSUJESVIgPSAiPCUgcmV0dXJuIG9zLmdldGVudignQ0xJRU5UX0xVQV9ESVInKSAlPi9saWIiLAogIExVQV9MSUJESVJfRklMRSA9ICJsaWJsdWEuYSIsCgogIENGTEFHUyA9ICItSSA8JSByZXR1cm4gb3MuZ2V0ZW52KCdDTElFTlRfTFVBX0RJUicpICU+L2luY2x1ZGUiLAogIExERkxBR1MgPSAiLUwgPCUgcmV0dXJuIG9zLmdldGVudignQ0xJRU5UX0xVQV9ESVInKSAlPi9saWIiLAogIExJQkZMQUcgPSAiLXNoYXJlZCIsCgogIENDID0gImVtY2MiLAogIENYWCA9ICJlbSsrIiwKICBBUiA9ICJlbWFyIiwKICBMRCA9ICJlbWNjIiwKICBOTSA9ICJsbHZtLW5tIiwKICBMRFNIQVJFRCA9ICJlbWNjIiwKICBSQU5MSUIgPSAiZW1yYW5saWIiLAoKfQoKPCUgdGVtcGxhdGU6cG9wKCkgJT4K
+TEST_LUACOV_DATA = PCUKCiAgc3RyID0gcmVxdWlyZSgic2FudG9rdS5zdHJpbmciKQogIGZzID0gcmVxdWlyZSgic2FudG9rdS5mcyIpCiAgZ2VuID0gcmVxdWlyZSgic2FudG9rdS5nZW4iKQogIHZlYyA9IHJlcXVpcmUoInNhbnRva3UudmVjdG9yIikKCiAgZmlsZXMgPSBnZW4ucGFjaygibGliIiwgImJpbiIpOmZpbHRlcihmdW5jdGlvbiAoZGlyKQogICAgcmV0dXJuIGNoZWNrKGZzLmV4aXN0cyhkaXIpKQogIGVuZCk6bWFwKGZ1bmN0aW9uIChyZWxkaXIpCiAgICByZWxkaXIgPSByZWxkaXIgLi4gZnMucGF0aGRlbGltCiAgICByZXR1cm4gZnMuZmlsZXMocmVsZGlyLCB7IHJlY3Vyc2UgPSB0cnVlIH0pOm1hcChjaGVjayk6ZmlsdGVyKGZ1bmN0aW9uIChmcCkKICAgICAgcmV0dXJuIHZlYygibHVhIiwgImMiLCAiY3BwIik6aW5jbHVkZXMoc3RyaW5nLmxvd2VyKGZzLmV4dGVuc2lvbihmcCkpKQogICAgZW5kKTpwYXN0ZWwocmVsZGlyKQogIGVuZCk6ZmxhdHRlbigpOm1hcChmdW5jdGlvbiAocmVsZGlyLCBmcCkKICAgIGxvY2FsIG1vZCA9IGZzLnN0cmlwZXh0ZW5zaW9uKHN0ci5zdHJpcHByZWZpeChmcCwgcmVsZGlyKSk6Z3N1YigiLyIsICIuIikKICAgIHJldHVybiBtb2QsIGZwLCBmcy5qb2luKG9zLmdldGVudigiQlVJTERfRElSIiksIGZwKQogIGVuZCkKCiU+Cgptb2R1bGVzID0gewogIDwlIHJldHVybiBmaWxlczptYXAoZnVuY3Rpb24gKG1vZCwgcmVscGF0aCkKICAgIHJldHVybiBzdHIuaW50ZXJwKCJbXCIlbW9kXCJdID0gXCIlcmVscGF0aFwiIiwgeyBtb2QgPSBtb2QsIHJlbHBhdGggPSByZWxwYXRoIH0pCiAgZW5kKTpjb25jYXQoIixcbiIpICU+Cn0KCmluY2x1ZGUgPSB7CiAgPCUgcmV0dXJuIGZpbGVzOm1hcChmdW5jdGlvbiAoXywgXywgZnApCiAgICByZXR1cm4gc3RyLmludGVycCgiXCIlZnBcIiIsIHsgZnAgPSBmcCB9KQogIGVuZCk6Y29uY2F0KCIsXG4iKSAlPgp9CgpzdGF0c2ZpbGUgPSAiPCUgcmV0dXJuIG9zLmdldGVudigiVEVTVF9MVUFDT1ZfU1RBVFNfRklMRSIpICU+IgpyZXBvcnRmaWxlID0gIjwlIHJldHVybiBvcy5nZXRlbnYoIlRFU1RfTFVBQ09WX1JFUE9SVF9GSUxFIikgJT4iCg==
+TEST_LUACHECK_DATA = cXVpZXQgPSAxCnN0ZCA9ICJtaW4iCmlnbm9yZSA9IHsgIjQzKiIgfSAtLSBVcHZhbHVlIHNoYWRvd2luZwpnbG9iYWxzID0geyAibmd4IiwgImppdCIgfQo=
 
-# $(error "Test set: $(TESTED_FILES)")
+export TEST_RUN_SH_DATA = IyEvYmluL3NoCgo8JQogIGdlbiA9IHJlcXVpcmUoInNhbnRva3UuZ2VuIikKICBzdHIgPSByZXF1aXJlKCJzYW50b2t1LnN0cmluZyIpCiAgdmVjID0gcmVxdWlyZSgic2FudG9rdS52ZWN0b3IiKQolPgoKLiAuL2x1YS5lbnYKCjwlIHJldHVybiB2ZWMud3JhcCh0ZXN0X2VudnMgb3Ige30pOmV4dGVuZChzdHIuc3BsaXQob3MuZ2V0ZW52KCJURVNUX0VOVlMiKSBvciAiIikpOmZpbHRlcihmdW5jdGlvbiAoZnApCiAgcmV0dXJuIG5vdCBzdHIuaXNlbXB0eShmcCkKZW5kKTptYXAoZnVuY3Rpb24gKGVudikKICByZXR1cm4gIi4gIiAuLiBlbnYKZW5kKTpjb25jYXQoIlxuIikgJT4KCmlmIFsgLW4gIiRURVNUX0NNRCIgXTsgdGhlbgoKICBzZXQgLXgKICBjZCAiJFJPT1RfRElSIgogICRURVNUX0NNRAoKZWxzZQoKICBybSAtZiBsdWFjb3Yuc3RhdHMub3V0IGx1YWNvdi5yZXBvcnQub3V0IHx8IHRydWUKCiAgPCUgdGVtcGxhdGU6cHVzaChvcy5nZXRlbnYodmFyaWFibGVfcHJlZml4IC4uICJfV0FTTSIpID09ICIxIikgJT4KCiAgICBpZiBbIC1uICIkVEVTVCIgXTsgdGhlbgogICAgICBURVNUPSJzcGVjLWJ1bmRsZWQvJHtURVNUI3Rlc3Qvc3BlYy99IgogICAgICB0b2t1IHRlc3QgLXMgLWkgbm9kZSAiJFRFU1QiCiAgICAgIHN0YXR1cz0kPwogICAgZWxpZiBbIC1kIHNwZWMtYnVuZGxlZCBdOyB0aGVuCiAgICAgIHRva3UgdGVzdCAtcyAtaSBub2RlIHNwZWMtYnVuZGxlZAogICAgICBzdGF0dXM9JD8KICAgIGZpCgogIDwlIHRlbXBsYXRlOnBvcCgpOnB1c2gob3MuZ2V0ZW52KHZhcmlhYmxlX3ByZWZpeCAuLiAiX1dBU00iKSB+PSAiMSIpICU+CgogICAgaWYgWyAtbiAiJFRFU1QiIF07IHRoZW4KICAgICAgVEVTVD0iJHtURVNUI3Rlc3QvfSIKICAgICAgdG9rdSB0ZXN0IC1zIC1pICIkTFVBIC1sIGx1YWNvdiIgIiRURVNUIgogICAgICBzdGF0dXM9JD8KICAgIGVsaWYgWyAtZCBzcGVjIF07IHRoZW4KICAgICAgdG9rdSB0ZXN0IC1zIC1pICIkTFVBIC1sIGx1YWNvdiIgLS1tYXRjaCAiXi4qJS5sdWEkIiBzcGVjCiAgICAgIHN0YXR1cz0kPwogICAgZmkKCiAgPCUgdGVtcGxhdGU6cG9wKCkgJT4KCiAgaWYgWyAiJHN0YXR1cyIgPSAiMCIgXSAmJiBbIC1mIGx1YWNvdi5sdWEgXTsgdGhlbgogICAgbHVhY292IC1jIGx1YWNvdi5sdWEKICBmaQoKICBpZiBbICIkc3RhdHVzIiA9ICIwIiBdICYmIFsgLWYgbHVhY292LnJlcG9ydC5vdXQgXTsgdGhlbgogICAgY2F0IGx1YWNvdi5yZXBvcnQub3V0IHwgYXdrICcvXlN1bW1hcnkvIHsgUCA9IE5SIH0gUCAmJiBOUiA+IFAgKyAxJwogIGZpCgogIGVjaG8KCiAgaWYgWyAtZiBsdWFjaGVjay5sdWEgXTsgdGhlbgogICAgbHVhY2hlY2sgLS1jb25maWcgbHVhY2hlY2subHVhICQoZmluZCBsaWIgYmluIHNwZWMgLW1heGRlcHRoIDAgMj4vZGV2L251bGwpCiAgZmkKCiAgZWNobwoKZmkK
 
+CONFIG_DEPS = $(lastword $(MAKEFILE_LIST))
+CONFIG_DEPS += $(ROCKSPEC) $(LUAROCKS_MK) $(LIB_MK) $(BIN_MK)
+CONFIG_DEPS += $(TEST_ROCKSPEC) $(TEST_LUAROCKS_MK) $(TEST_LIB_MK) $(TEST_BIN_MK) $(TEST_LUAROCKS_CFG)
+CONFIG_DEPS += $(TEST_ENV) $(TEST_LUACOV_CFG) $(TEST_LUACHECK_CFG)
+CONFIG_DEPS += $(addprefix $(BUILD_DIR)/, $(LIB) $(BIN) $(RES) $(DEPS))
+CONFIG_DEPS += $(addprefix $(BUILD_DIR)/test/, $(LIB) $(BIN) $(RES) $(DEPS))
+
+ifeq ($($(VPFX)_WASM),1)
+CONFIG_DEPS += $(addprefix $(BUILD_DIR)/, $(TEST_SPEC) $(TEST_OTHER))
+export WASM_TESTS = $(patsubst test/spec/%.lua,$(BUILD_DIR)/test/spec-bundled/%, $(TEST_SPEC))
 else
-
-TESTED_FILES = $(TEST_SPEC_DISTS)
-
-# $(error "Test unset: $(TESTED_FILES)")
-
+CONFIG_DEPS += $(addprefix $(BUILD_DIR)/, $(TEST_SPEC) $(TEST_OTHER))
 endif
 
-ifneq ($(EMSCRIPTEN),1)
+TARBALL = $(TARBALL_DIR).tar.gz
+TARBALL_DIR = $(NAME)-$(VERSION)
+TARBALL_SRCS = Makefile lib/Makefile bin/Makefile $(shell find lib bin deps res -type f 2>/dev/null)
 
-TEST_SPEC_DISTS := $(filter-out %/web.test, $(TEST_SPEC_DISTS))
-TESTED_FILES := $(filter-out %/web.test, $(TEST_SPEC_DISTS))
-
+ifeq ($($(VPFX)_WASM),1)
+CLIENT_LUA_OK = $(BUILD_DIR)/lua.ok
+export CLIENT_LUA_DIR = $(BUILD_DIR)/lua-5.1.5
+CONFIG_DEPS := $(CLIENT_LUA_OK) $(CONFIG_DEPS)
+$(CLIENT_LUA_OK):
+	mkdir -p $(BUILD_DIR)
+	[ ! -f $(BUILD_DIR)/lua-5.1.5.tar.gz ] && \
+		cd $(BUILD_DIR) && wget https://www.lua.org/ftp/lua-5.1.5.tar.gz || true
+	rm -rf $(BUILD_DIR)/lua-5.1.5
+	cd $(BUILD_DIR) && tar xf lua-5.1.5.tar.gz
+	# TODO: we should  only link nodefs.js and noderawfs.js for the version of lua
+	# we're running on the cli, not the version linked to the output programs,
+	# right?
+	cd $(BUILD_DIR)/lua-5.1.5 && make generic $(CLIENT_VARS) AR="emar rcu" MYLDFLAGS="$(LDFLAGS) -sSINGLE_FILE -sEXIT_RUNTIME=1 -lnodefs.js -lnoderawfs.js"
+	cd $(BUILD_DIR)/lua-5.1.5 && make local $(CLIENT_VARS) AR="emar rcu" MYLDFLAGS="$(LDFLAGS) -sSINGLE_FILE -sEXIT_RUNTIME=1 -lnodefs.js -lnoderawfs.js"
+	cd $(BUILD_DIR)/lua-5.1.5/bin && mv lua lua.js
+	cd $(BUILD_DIR)/lua-5.1.5/bin && mv luac luac.js
+	cd $(BUILD_DIR)/lua-5.1.5/bin && printf "#!/bin/sh\nnode \"\$$(dirname \$$0)/lua.js\" \"\$$@\"\n" > lua && chmod +x lua
+	cd $(BUILD_DIR)/lua-5.1.5/bin && printf "#!/bin/sh\nnode \"\$$(dirname \$$0)/luac.js\" \"\$$@\"\n" > luac && chmod +x luac
+	touch "$@"
 endif
 
-TEST_LUA_PATH ?= $(WORK_DIR)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?/init.lua
-TEST_LUA_CPATH ?= $(WORK_DIR)/?.so;$(LUAROCKS_TREE)/lib/lua/$(LUA_MINMAJ)/?.so
+all: $(CONFIG_DEPS)
+	@echo "Running all"
 
-ifeq ($(LOCAL_LUAROCKS),1)
+install: all
+	@echo "Running install"
+	cd $(BUILD_DIR) && $(LUAROCKS) make $(ROCKSPEC) $(LUAROCKS_VARS)
 
-LUAROCKS_CFG ?= $(WORK_DIR)/luarocks.config.local.lua
-LUAROCKS_CFG_T ?= $(CONFIG_DIR)/luarocks.config.local.lua
-LUAROCKS_TREE ?= $(WORK_DIR)/luarocks
+test: all
+	@echo "Running test"
+	cd $(BUILD_DIR)/test && $(TEST_LUAROCKS) make $(TEST_ROCKSPEC) $(LUAROCKS_VARS)
+	cd $(BUILD_DIR)/test && $(TEST_LUAROCKS) test $(TEST_ROCKSPEC) $(LUAROCKS_VARS)
 
-LUA_PATH = $(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?.lua;$(LUAROCKS_TREE)/share/lua/$(LUA_MINMAJ)/?/init.lua
-LUA_CPATH = $(LUAROCKS_TREE)/lib/lua/$(LUA_MINMAJ)/?.so
-LUAROCKS = LUAROCKS_CONFIG="$(LUAROCKS_CFG)" luarocks --tree "$(LUAROCKS_TREE)"
+iterate: all
+	@echo "Running iterate"
+	@while true; do \
+		$(MAKE) test; \
+		inotifywait -qqr -e close_write -e create -e delete $(filter-out tmp, $(wildcard *)); \
+	done
 
-DEPS += $(LUAROCKS_CFG)
+test-luarocks: $(CONFIG_DEPS)
+	$(TEST_LUAROCKS) $(ARGS)
 
-$(LUAROCKS_CFG): $(LUAROCKS_CFG_T)
-	mkdir -p "$(dir $@)"
-	ROCKS_TREE="$(LUAROCKS_TREE)" \
-  LUA_INCDIR="$(LUA_INCDIR)" \
-  LUA_LIBDIR="$(LUA_LIBDIR)" \
-  CC="$(CC)" \
-  LD="$(LD)" \
-  AR="$(AR)" \
-  NM="$(NM)" \
-  RANLIB="$(RANLIB)" \
-  CFLAGS="$(CFLAGS)" \
-  LDFLAGS="$(LDFLAGS)" \
-  LIBFLAG="$(LIBFLAG)" \
-		toku template \
-			-f "$(LUAROCKS_CFG_T)" \
-			-o "$(LUAROCKS_CFG)"
+ifeq ($($(VPFX)_PUBLIC),1)
 
-endif
+tarball:
+	@rm -f $(BUILD_DIR)/$(TARBALL) || true
+	cd $(BUILD_DIR) && \
+		tar --dereference --transform 's#^#$(TARBALL_DIR)/#' -czvf $(TARBALL) \
+			$$(ls $(TARBALL_SRCS) 2>/dev/null)
 
-LUACHECK_CFG ?= $(TEST_SRC_DIR)/luacheck.lua
-LUACHECK_SRCS ?= src
-
-LUACOV_CFG ?= $(WORK_DIR)/luacov.lua
-LUACOV_CFG_T ?= $(TEST_SRC_DIR)/luacov.lua
-LUACOV_STATS_FILE ?= $(WORK_DIR)/luacov.stats.out
-LUACOV_REPORT_FILE ?= $(WORK_DIR)/luacov.report.out
-LUACOV_INCLUDE ?= $(SRC_DIR)
-
-build: $(DEPS) $(BUILD_C)
-
-install: $(DEPS)
-	$(LUAROCKS) make $(ROCKSPEC)
-
-upload: $(ROCKSPEC)
+check-release-status:
 	@if test -z "$(LUAROCKS_API_KEY)"; then echo "Missing LUAROCKS_API_KEY variable"; exit 1; fi
 	@if ! git diff --quiet; then echo "Commit your changes first"; exit 1; fi
+
+github-release: check-release-status tarball
+	gh release create --generate-notes "$(VERSION)" "$(BUILD_DIR)/$(TARBALL)" "$(ROCKSPEC)"
+
+luarocks-upload: check-release-status
+	luarocks upload --skip-pack --api-key "$(LUAROCKS_API_KEY)" "$(ROCKSPEC)"
+
+release: test check-release-status
 	git tag "$(VERSION)"
 	git push --tags
 	git push
-	$(LUAROCKS) upload --skip-pack --api-key "$(LUAROCKS_API_KEY)" "$(ROCKSPEC)"
+	$(MAKE) github-release
+	$(MAKE) luarocks-upload
 
-clean:
-	rm -rf build
+endif
 
-test: $(DEPS) $(TEST_SPEC_DISTS)
-	$(LUAROCKS) test $(ROCKSPEC)
+$(PREAMBLE): config.lua
+	@echo "Generating '$@'"
+	@sh -c 'echo $(PREAMBLE_DATA) | base64 -d | $(TOKU_TEMPLATE) -f - -o "$@"'
 
-luarocks-build: $(BUILD_C)
+$(ROCKSPEC): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(ROCKSPEC_DATA) | base64 -d | $(TOKU_TEMPLATE) -f - -o "$@"'
 
-luarocks-install: $(INST_LUA) $(INST_C)
+$(LUAROCKS_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(LUAROCKS_MK_DATA) | base64 -d | $(TOKU_TEMPLATE) -f - -o "$@"'
 
-# TODO: 'install' should be luarocks-install, but how to we set INST_LIB/BINDIR?
-luarocks-test: $(DEPS) $(LUACOV_CFG) $(LUACHECK_CFG)
-	if SANITIZE="$(SANITIZE)" $(TOKU_TEST) $(TESTED_FILES); then \
-		luacov -c "$(LUACOV_CFG)"; \
-		cat "$(LUACOV_REPORT_FILE)" | \
-			awk '/^Summary/ { P = NR } P && NR > P + 1'; \
-		echo; \
-		luacheck --config "$(LUACHECK_CFG)" $(LUACHECK_SRCS) || true; \
-		echo; \
-	fi
+$(LIB_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(LIB_MK_DATA) | base64 -d | $(TOKU_TEMPLATE) -f - -o "$@"'
 
-luarocks-test-run: $(ROCKSPEC)
-	$(LUAROCKS) $(ARGS)
+$(BIN_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(BIN_MK_DATA) | base64 -d | $(TOKU_TEMPLATE) -f - -o "$@"'
 
-iterate: $(ROCKSPEC)
-	@while true; do \
-		$(MAKE) $(MAKEFLAGS) test; \
-		inotifywait -qqr -e close_write -e create -e delete -e delete \
-			Makefile $(SRC_DIR) $(CONFIG_DIR) $(TEST_SPEC_SRC_DIR); \
-	done
+$(TEST_LIB_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(LIB_MK_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(INST_LUADIR)/%.lua: $(SRC_DIR)/%.lua
-	@if test -z "$(INST_LUADIR)"; then echo "Missing INST_LUADIR variable"; exit 1; fi
-	mkdir -p "$(dir $@)"
-	cp "$<" "$@"
+$(TEST_BIN_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(BIN_MK_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(INST_LIBDIR)/%.so: $(WORK_DIR)/%.so
-	@if test -z "$(INST_LIBDIR)"; then echo "Missing INST_LIBDIR variable"; exit 1; fi
-	mkdir -p "$(dir $@)"
-	cp "$<" "$@"
+$(TEST_ROCKSPEC): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(ROCKSPEC_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(WORK_DIR)/%.so: $(SRC_DIR)/%.c $(JPEG_LIB)
-	mkdir -p "$(dir $@)"
-	$(CC) $(CFLAGS) $(LIB_CFLAGS) $(LDFLAGS) $(LIB_LDFLAGS) $(LIBFLAG) "$<" -o "$@"
+$(TEST_LUAROCKS_CFG):
+	@echo "Generating '$@'"
+	@sh -c 'echo $(TEST_LUAROCKS_CFG_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(ROCKSPEC): $(ROCKSPEC_T)
-	mkdir -p "$(dir $@)"
-	NAME="$(NAME)" \
-	VERSION="$(VERSION)" \
-	GIT_URL="$(GIT_URL)" \
-	HOMEPAGE="$(HOMEPAGE)" \
-	LICENSE="$(LICENSE)" \
-	EMSCRIPTEN="$(EMSCRIPTEN)" \
-		toku template \
-			-f "$(ROCKSPEC_T)" \
-			-o "$(ROCKSPEC)"
+$(TEST_LUAROCKS_MK): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(LUAROCKS_MK_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(TEST_SPEC_DIST_DIR)/%.test: $(TEST_SPEC_SRC_DIR)/%.lua
-	mkdir -p "$(dir $@)"
-	CC="$(CC)" \
-	LD="$(LD)" \
-	AR="$(AR)" \
-	NM="$(NM)" \
-	RANLIB="$(RANLIB)" \
-	LIBFLAG="$(LIBFLAG)" \
-		$(TOKU_BUNDLE) \
-			-E SANITIZE "$(SANITIZE)" \
-			-E LUACOV_CONFIG "$(LUACOV_CFG)" \
-			-e LUA_PATH "$(TEST_LUA_PATH)" \
-			-e LUA_CPATH "$(TEST_LUA_CPATH)" \
-			--cflags " $(TEST_CFLAGS) $(CFLAGS)" \
-			--ldflags " $(TEST_LDFLAGS) $(LDFLAGS)" \
-			-f "$<" -o "$(dir $@)" -O "$(notdir $@)" \
+$(TEST_LUACOV_CFG): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(TEST_LUACOV_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-$(LUACOV_CFG): $(LUACOV_CFG_T)
-	mkdir -p "$(dir $@)"
-	STATS_FILE="$(LUACOV_STATS_FILE)" \
-	REPORT_FILE="$(LUACOV_REPORT_FILE)" \
-	INCLUDE="$(LUACOV_INCLUDE)" \
-		toku template \
-			-f "$(LUACOV_CFG_T)" \
-			-o "$(LUACOV_CFG)"
+$(TEST_LUACHECK_CFG): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@sh -c 'echo $(TEST_LUACHECK_DATA) | base64 -d | $(TOKU_TEMPLATE_TEST) -f - -o "$@"'
 
-include $(shell find $(WORK_DIR) -type f -name '*.d')
+$(TEST_ENV): $(PREAMBLE)
+	@echo "Generating '$@'"
+	@echo "export LUA=\"$(shell $(TEST_LUAROCKS) config lua_interpreter)\"" > "$@"
+	@echo "export LUA_PATH=\"$(shell $(TEST_LUAROCKS) path --lr-path);?.lua\"" >> "$@"
+	@echo "export LUA_CPATH=\"$(shell $(TEST_LUAROCKS) path --lr-cpath)\"" >> "$@"
 
-.PHONY: build install upload clean test iterate luarocks-build luarocks-install luarocks-test luarocks-test-run
+$(BUILD_DIR)/%: %
+	@case "$<" in \
+		res/*) \
+			echo "Copying '$<' -> '$@'"; \
+			mkdir -p "$(dir $@)"; \
+			cp "$<" "$@";; \
+		test/res/*) \
+			echo "Copying '$<' -> '$@'"; \
+			mkdir -p "$(dir $@)"; \
+			cp "$<" "$@";; \
+		*) \
+			echo "Templating '$<' -> '$@'"; \
+			$(TOKU_TEMPLATE) -f "$<" -o "$@";; \
+	esac
+
+$(BUILD_DIR)/test/%: %
+	@case "$<" in \
+		res/*) \
+			echo "Copying '$<' -> '$@'"; \
+			mkdir -p "$(dir $@)"; \
+			cp "$<" "$@";; \
+		test/res/*) \
+			echo "Copying '$<' -> '$@'"; \
+			mkdir -p "$(dir $@)"; \
+			cp "$<" "$@";; \
+		*) \
+			echo "Templating '$<' -> '$@'"; \
+			$(TOKU_TEMPLATE) -f "$<" -o "$@";; \
+	esac
+
+-include $(shell find $(BUILD_DIR) -regex ".*/deps/.*/.*" -prune -o -name "*.d" -print 2>/dev/null)
+
+.PHONY: all test iterate install release check-release-status github-release luarocks-upload test-luarocks

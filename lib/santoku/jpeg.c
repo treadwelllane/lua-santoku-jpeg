@@ -7,13 +7,9 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdlib.h>
+#include <stdint.h>
 
-#define debug(...) \
-  fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n");
-
-#define MTS "santoku_jpeg_scaler"
-
-int luaopen_santoku_jpeg (lua_State *);
+#define TK_JPEG_MT_SCALER "santoku_jpeg_scaler"
 
 struct tk_jpeg_state;
 
@@ -214,14 +210,14 @@ void tk_jpeg_destroy (tk_jpeg_state_t *state)
 
 int tk_jpeg_mts_destroy (lua_State *L)
 {
-  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -1, MTS);
+  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -1, TK_JPEG_MT_SCALER);
   tk_jpeg_destroy(state);
   return 0;
 }
 
 int tk_jpeg_mts_read (lua_State *L)
 {
-  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -1, MTS);
+  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -1, TK_JPEG_MT_SCALER);
 
   // TODO: Will this cause problems with lua's
   // coroutines?
@@ -329,7 +325,7 @@ int tk_jpeg_mts_write (lua_State *L)
   if (lua_gettop(L) != 2)
     luaL_error(L, "expected 2 arguments to write");
 
-  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -2, MTS);
+  tk_jpeg_state_t *state = (tk_jpeg_state_t *) luaL_checkudata(L, -2, TK_JPEG_MT_SCALER);
 
   if (state->state == TK_JPEG_STATE_DONE)
     luaL_error(L, "scaler is done");
@@ -368,34 +364,28 @@ int tk_jpeg_mt_scale (lua_State *L)
   if (lua_gettop(L) != 4)
     luaL_error(L, "expected 4 arguments to scale");
 
-  int i_scale_num = lua_absindex(L, -4);
-  int i_scale_denom = lua_absindex(L, -3);
-  int i_scale_quality = lua_absindex(L, -2);
-  int i_bufsize = lua_absindex(L, -1);
+  luaL_checktype(L, -4, LUA_TNUMBER);
+  int scale_num = lua_tointeger(L, -4);
 
-  // scale fraction numerator
-  luaL_checktype(L, i_scale_num, LUA_TNUMBER);
+  luaL_checktype(L, -3, LUA_TNUMBER);
+  int scale_denom = lua_tointeger(L, -3);
 
-  // scale fraction denominator
-  luaL_checktype(L, i_scale_denom, LUA_TNUMBER);
+  luaL_checktype(L, -2, LUA_TNUMBER);
+  int scale_quality = lua_tointeger(L, -2);
 
-  // scale quality
-  luaL_checktype(L, i_scale_quality, LUA_TNUMBER);
+  luaL_checktype(L, -1, LUA_TNUMBER);
+  int bufsize = lua_tointeger(L, -1);
 
-  // scale quality
-  luaL_checktype(L, i_bufsize, LUA_TNUMBER);
-
-  tk_jpeg_state_t *state = lua_newuserdatauv(L, sizeof(tk_jpeg_state_t), 1);
-  lua_pushvalue(L, lua_upvalueindex(1));
-  lua_setiuservalue(L, -2, 1);
-  luaL_setmetatable(L, MTS);
+  tk_jpeg_state_t *state = lua_newuserdata(L, sizeof(tk_jpeg_state_t));
+  luaL_getmetatable(L, TK_JPEG_MT_SCALER);
+  lua_setmetatable(L, -2);
 
   state->state = TK_JPEG_STATE_READ_HEADER;
   state->L = L;
-  state->bufsize = lua_tointeger(L, i_bufsize);
-  state->scale_quality = lua_tointeger(L, i_scale_quality);
-  state->scale_num = lua_tointeger(L, i_scale_num);
-  state->scale_denom = lua_tointeger(L, i_scale_denom);
+  state->bufsize = bufsize;
+  state->scale_quality = scale_quality;
+  state->scale_num = scale_num;
+  state->scale_denom = scale_denom;
   state->src_skip = 0;
   state->src_origin = NULL;
   state->src_buffer[0] = NULL;
@@ -463,8 +453,7 @@ luaL_Reg tk_jpeg_mt_fns[] =
 int luaopen_santoku_jpeg (lua_State *L)
 {
   lua_newtable(L); // mt
-  lua_pushvalue(L, -1); // mt mt
-  luaL_setfuncs(L, tk_jpeg_mt_fns, 1); // mt
+  luaL_register(L, NULL, tk_jpeg_mt_fns); // mt
 
   lua_pushinteger(L, TK_JPEG_STATUS_WRITE); // mt tag
   lua_setfield(L, -2, "WRITE"); // mt
@@ -475,10 +464,9 @@ int luaopen_santoku_jpeg (lua_State *L)
   lua_pushinteger(L, TK_JPEG_STATUS_DONE); // mt tag
   lua_setfield(L, -2, "DONE"); // mt
 
-  luaL_newmetatable(L, MTS); // mt mts
+  luaL_newmetatable(L, TK_JPEG_MT_SCALER); // mt mts
   lua_newtable(L); // mt mts idx
-  lua_pushvalue(L, -3); // mt mts idx mt
-  luaL_setfuncs(L, tk_jpeg_mts_fns, 1); // mt mts idx
+  luaL_register(L, NULL, tk_jpeg_mts_fns); // mt mts idx
   lua_setfield(L, -2, "__index"); // mt mts
   lua_pushcfunction(L, tk_jpeg_mts_destroy);
   lua_setfield(L, -2, "__gc");

@@ -3,9 +3,10 @@
 - Basic README
 - Documentation
 
+- Convert to santoku makefile
+
 - Figure out install logic
-    - Flag for download/install libjpeg that is
-      used with emscripten
+    - Flag for download/install libjpeg that is used with emscripten
 
 - Options object instead of position args
     - Scaling options
