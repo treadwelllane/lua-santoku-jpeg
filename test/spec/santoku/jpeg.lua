@@ -1,4 +1,3 @@
-local assert = require("luassert")
 local test = require("santoku.test")
 local jpeg = require("santoku.jpeg")
 local vec = require("santoku.vector")
@@ -11,7 +10,7 @@ test("jpeg", function ()
     test("resizes a jpeg", function ()
 
       local ok, input_data = fs.readfile("res/image1.jpg")
-      assert.equals(true, ok, input_data)
+      assert(ok == true, input_data)
 
       local input_chunk_size = 100
       local input_pos = 1
@@ -25,8 +24,8 @@ test("jpeg", function ()
 
         local ok, status, output_chunk = scaler:read()
 
-        assert.equals(true, ok, status)
-        assert(status == jpeg.READ or status == jpeg.WRITE or status == jpeg.DONE)
+        assert(ok == true, status)
+        assert(status == jpeg.READ or status == jpeg.WRITE or status == jpeg.DONE, "unexpected status")
 
         if status == jpeg.READ then
 
@@ -39,7 +38,7 @@ test("jpeg", function ()
           input_pos = next_pos + 1
 
           local ok, status = scaler:write(input_chunk)
-          assert.equals(true, ok, status)
+          assert(ok == true, status)
 
         else
           break
@@ -49,7 +48,7 @@ test("jpeg", function ()
 
       local output_data = output_chunks:concat()
       local ok, status = fs.writefile("res/image1.smaller.jpg", output_data)
-      assert.equals(true, ok, status)
+      assert(ok == true, status)
 
     end)
 

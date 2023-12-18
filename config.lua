@@ -10,13 +10,12 @@ local env = {
 
   dependencies = {
     "lua >= 5.1",
-    "santoku >= 0.0.148-1",
+    "santoku >= 0.0.150-1",
     "santoku-fs >= 0.0.6-1"
   },
 
   test_dependencies = {
     "santoku-test >= 0.0.4-1",
-    "luassert >= 1.9.0-1",
     "luacov >= scm-1",
     compat.unpack(os.getenv("TK_JPEG_WASM") == "1" and {
       "santoku-web >= 0.0.81-1"

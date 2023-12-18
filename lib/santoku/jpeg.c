@@ -11,6 +11,11 @@
 
 #define TK_JPEG_MT_SCALER "santoku_jpeg_scaler"
 
+#define tk_jpeg_debug(...) \
+  fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "\n");
+
 struct tk_jpeg_state;
 
 typedef struct
