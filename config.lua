@@ -19,9 +19,9 @@ local env = {
     "luassert >= 1.9.0-1",
     "luacheck >= 1.1.0-1",
     "luacov >= scm-1",
-    -- compat.unpack(os.getenv("TK_JPEG_WASM") == "1" and {
-    --   "santoku-web >= 0.0.79-1"
-    -- } or {})
+    compat.unpack(os.getenv("TK_JPEG_WASM") == "1" and {
+      "santoku-web >= 0.0.81-1"
+    } or {})
   },
 
 }
