@@ -6,7 +6,6 @@ local jpeg = require("santoku.jpeg")
 local async = require("santoku.async")
 local vec = require("santoku.vector")
 local fs = require("santoku.fs")
-local js = require("santoku.web.js")
 local val = require("santoku.web.val")
 
 collectgarbage("stop")
@@ -89,12 +88,9 @@ val.global("gc"):call(nil)
 val.global("setTimeout", function ()
 
   local cntt = 0
-  for k, v in pairs(val.IDX_REF_TBL) do
-    -- print(k, v)
+  for _ in pairs(val.IDX_REF_TBL) do
     cntt = cntt + 1
   end
-
-  -- print("IDX_REF_TBL:", cntt)
 
   assert.equals(0, cntt, "IDX_REF_TBL not clean")
 
