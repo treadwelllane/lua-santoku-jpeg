@@ -1,13 +1,9 @@
-ifeq ($($(VPFX)_WASM),1)
-$(VPFX)_LOCAL_JPEG = 1
-endif
+<% template:push(wasm) %>
 
-ifeq ($($(VPFX)_LOCAL_JPEG),1)
-
-$(VPFX)_JPEG_VERSION ?= 9e
-JPEG_URL = https://ijg.org/files/jpegsrc.v$($(VPFX)_JPEG_VERSION).tar.gz
-JPEG_ARCHIVE = jpegsrc.v$($(VPFX)_JPEG_VERSION).tar.gz
-JPEG_DIR = $(CURDIR)/jpeg-$($(VPFX)_JPEG_VERSION)
+<% return var("VERSION") %> ?= 9e
+JPEG_URL = https://ijg.org/files/jpegsrc.v$(<% return var("VERSION") %>).tar.gz
+JPEG_ARCHIVE = jpegsrc.v$(<% return var("VERSION") %>).tar.gz
+JPEG_DIR = $(CURDIR)/jpeg-$(<% return var("VERSION") %>)
 JPEG_LIB = $(JPEG_DIR)/.libs/libjpeg.a
 
 results.mk: Makefile $(JPEG_LIB)
@@ -23,14 +19,14 @@ $(JPEG_LIB): $(JPEG_ARCHIVE)
 $(JPEG_ARCHIVE):
 	curl -LsSo "$(JPEG_ARCHIVE)" "$(JPEG_URL)"
 
-else
+<% template:pop():push(not wasm) %>
 
-$(VPFX)_JPEG_CFLAGS ?=
-$(VPFX)_JPEG_LDFLAGS ?= -ljpeg
+<% return var("CFLAGS") %> ?=
+<% return var("LDFLAGS") %> ?= -ljpeg
 
 results.mk: Makefile
 	truncate -s0 results.mk
-	echo "LIB_CFLAGS += $($(VPFX)_JPEG_CFLAGS)" >> results.mk
-	echo "LIB_LDFLAGS += $($(VPFX)_JPEG_LDFLAGS)" >> results.mk
+	echo "LIB_CFLAGS += $(<% return var("CFLAGS") %>)" >> results.mk
+	echo "LIB_LDFLAGS += $(<% return var("LDFLAGS") %>)" >> results.mk
 
-endif
+<% template:pop() %>

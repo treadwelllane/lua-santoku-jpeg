@@ -9,7 +9,7 @@ test("jpeg", function ()
 
     test("resizes a jpeg", function ()
 
-      local ok, input_data = fs.readfile("res/image1.jpg")
+      local ok, input_data = fs.readfile("test/res/image1.jpg")
       assert(ok == true, input_data)
 
       local input_chunk_size = 100
@@ -47,7 +47,7 @@ test("jpeg", function ()
       end
 
       local output_data = output_chunks:concat()
-      local ok, status = fs.writefile("res/image1.smaller.jpg", output_data)
+      local ok, status = fs.writefile("test/res/image1.smaller.jpg", output_data)
       assert(ok == true, status)
 
     end)

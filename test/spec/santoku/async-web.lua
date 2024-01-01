@@ -1,4 +1,4 @@
-<% template:push(os.getenv("TK_JPEG_WASM") == "1") %>
+<% template:push(wasm) %>
 
 local test = require("santoku.test")
 local jpeg = require("santoku.jpeg")
@@ -13,7 +13,7 @@ test("jpeg", function ()
 
     test("resizes a jpeg", function ()
 
-      local ok, input_data = fs.readfile("res/image1.jpg")
+      local ok, input_data = fs.readfile("test/res/image1.jpg")
       assert(ok == true, input_data)
 
       local input_chunk_size = 100
@@ -70,7 +70,7 @@ test("jpeg", function ()
 
         assert(ok == true, err)
         local output_data = output_chunks:concat()
-        local ok, err = fs.writefile("res/image1.smaller.jpg", output_data)
+        local ok, err = fs.writefile("test/res/image1.smaller.jpg", output_data)
         assert(ok == true, err)
 
       end)
