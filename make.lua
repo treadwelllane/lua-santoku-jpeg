@@ -1,28 +1,25 @@
-local compat = require("santoku.compat")
-
 local env = {
 
   name = "santoku-jpeg",
-  version = "0.0.16-1",
+  version = "0.0.17-1",
   variable_prefix = "TK_JPEG",
   license = "MIT",
   public = true,
 
   dependencies = {
     "lua >= 5.1",
-    "santoku >= 0.0.162-1",
-    "santoku-fs >= 0.0.16-1"
+    "santoku >= 0.0.193-1",
+    "santoku-fs >= 0.0.29-1"
   },
 
   test = {
     dependencies = {
-      "santoku-test >= 0.0.8-1",
-      "luacov >= scm-1",
+      "luacov >= 0.15.0-1",
     },
     wasm = {
       ldflags = "--bind",
       dependencies = {
-        "santoku-web >= 0.0.86-1"
+        "santoku-web >= 0.0.87-1"
       }
     }
   },

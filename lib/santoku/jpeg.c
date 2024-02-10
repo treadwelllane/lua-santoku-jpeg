@@ -79,6 +79,27 @@ typedef struct tk_jpeg_state
 
 } tk_jpeg_state_t;
 
+// TODO: Duplicated across various libraries, need to consolidate
+void tk_jpeg_callmod (lua_State *L, int nargs, int nret, const char *smod, const char *sfn)
+{
+  lua_getglobal(L, "require"); // arg req
+  lua_pushstring(L, smod); // arg req smod
+  lua_call(L, 1, 1); // arg mod
+  lua_pushstring(L, sfn); // args mod sfn
+  lua_gettable(L, -2); // args mod fn
+  lua_remove(L, -2); // args fn
+  lua_insert(L, - nargs - 1); // fn args
+  lua_call(L, nargs, nret); // results
+}
+
+// int tk_jpeg_err (lua_State *L, int err)
+// {
+//   lua_pushstring(L, strerror(errno));
+//   lua_pushinteger(L, err);
+//   tk_jpeg_callmod(L, 2, 0, "santoku.error", "error");
+//   return 0;
+// }
+
 void tk_jpeg_comp_err_exit (j_common_ptr jp)
 {
   (*jp->err->output_message)(jp);
@@ -97,10 +118,8 @@ void tk_jpeg_comp_output_message (j_common_ptr jp)
   char buffer[JMSG_LENGTH_MAX];
   (*jp->err->format_message)(jp, buffer);
 
-  lua_pushboolean(L, 0);
-  lua_pushstring(L, "Compression error: ");
+  lua_pushstring(L, "Compression error");
   lua_pushstring(L, buffer);
-  lua_concat(L, 2);
 
   longjmp(comp->state->setjmp_buffer, 1);
 }
@@ -113,10 +132,8 @@ void tk_jpeg_decomp_output_message (j_common_ptr jp)
   char buffer[JMSG_LENGTH_MAX];
   (*jp->err->format_message)(jp, buffer);
 
-  lua_pushboolean(L, 0);
-  lua_pushstring(L, "Decompression error: ");
+  lua_pushstring(L, "Decompression error");
   lua_pushstring(L, buffer);
-  lua_concat(L, 2);
 
   longjmp(decomp->state->setjmp_buffer, 1);
 }
@@ -228,6 +245,7 @@ int tk_jpeg_mts_read (lua_State *L)
   // coroutines?
   if (setjmp(state->setjmp_buffer)) {
     tk_jpeg_destroy(state);
+    tk_jpeg_callmod(L, 2, 0, "santoku.error", "error");
     return 2;
   }
 
@@ -237,9 +255,8 @@ int tk_jpeg_mts_read (lua_State *L)
       case TK_JPEG_STATE_READ_HEADER:
 
         if (jpeg_read_header(&state->decomp.decomp, 1) == JPEG_SUSPENDED) {
-          lua_pushboolean(L, 1);
           lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
-          return 2;
+          return 1;
         }
 
         state->state = TK_JPEG_STATE_START_DECOMPRESS;
@@ -248,9 +265,8 @@ int tk_jpeg_mts_read (lua_State *L)
       case TK_JPEG_STATE_START_DECOMPRESS:
 
         if (jpeg_start_decompress(&state->decomp.decomp) == FALSE) {
-          lua_pushboolean(L, 1);
           lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
-          return 2;
+          return 1;
         }
 
         state->comp.comp.image_width = state->decomp.decomp.output_width;
@@ -281,20 +297,18 @@ int tk_jpeg_mts_read (lua_State *L)
             ptrdiff_t len = (void *)state->dest.next_output_byte - state->dest_origin;
 
             if (len > 0) {
-              lua_pushboolean(L, 1);
               lua_pushinteger(L, TK_JPEG_STATUS_READ);
               lua_pushlstring(L, (char *)state->dest_origin, len);
               state->dest.next_output_byte = state->dest_origin;
               state->dest.free_in_buffer = state->comp.bufsize;
-              return 3;
+              return 2;
             } else {
               continue;
             }
 
           } else {
-            lua_pushboolean(L, 1);
             lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
-            return 2;
+            return 1;
           }
 
         }
@@ -305,9 +319,8 @@ int tk_jpeg_mts_read (lua_State *L)
       case TK_JPEG_STATE_FINISH:
 
         if (jpeg_finish_decompress(&state->decomp.decomp) == FALSE) {
-          lua_pushboolean(L, 1);
           lua_pushinteger(L, TK_JPEG_STATUS_WRITE);
-          return 2;
+          return 1;
         } else {
           jpeg_finish_compress(&state->comp.comp);
           tk_jpeg_destroy(state);
@@ -317,9 +330,8 @@ int tk_jpeg_mts_read (lua_State *L)
 
       case TK_JPEG_STATE_DONE:
 
-        lua_pushboolean(L, 1);
         lua_pushinteger(L, TK_JPEG_STATUS_DONE);
-        return 2;
+        return 1;
 
     }
   }
@@ -360,8 +372,7 @@ int tk_jpeg_mts_write (lua_State *L)
   state->src.bytes_in_buffer += size;
 
 end:
-  lua_pushboolean(L, 1);
-  return 1;
+  return 0;
 }
 
 int tk_jpeg_mt_scale (lua_State *L)

@@ -1,6 +1,6 @@
 local test = require("santoku.test")
+local arr = require("santoku.array")
 local jpeg = require("santoku.jpeg")
-local vec = require("santoku.vector")
 local fs = require("santoku.fs")
 
 test("jpeg", function ()
@@ -9,27 +9,24 @@ test("jpeg", function ()
 
     test("resizes a jpeg", function ()
 
-      local ok, input_data = fs.readfile("test/res/image1.jpg")
-      assert(ok == true, input_data)
+      local input_data = fs.readfile("test/res/image1.jpg")
 
       local input_chunk_size = 100
       local input_pos = 1
 
-      local ok, scaler = jpeg.scale(1, 8, 35, 2500)
-      assert(ok, scaler)
+      local scaler = jpeg.scale(1, 8, 35, 2500)
 
-      local output_chunks = vec()
+      local output_chunks = {}
 
       while true do
 
-        local ok, status, output_chunk = scaler:read()
+        local status, output_chunk = scaler:read()
 
-        assert(ok == true, status)
         assert(status == jpeg.READ or status == jpeg.WRITE or status == jpeg.DONE, "unexpected status")
 
         if status == jpeg.READ then
 
-          output_chunks:append(output_chunk)
+          arr.push(output_chunks, output_chunk)
 
         elseif status == jpeg.WRITE then
 
@@ -37,8 +34,7 @@ test("jpeg", function ()
           local input_chunk = input_data:sub(input_pos, next_pos)
           input_pos = next_pos + 1
 
-          local ok, status = scaler:write(input_chunk)
-          assert(ok == true, status)
+          scaler:write(input_chunk)
 
         else
           break
@@ -46,9 +42,8 @@ test("jpeg", function ()
 
       end
 
-      local output_data = output_chunks:concat()
-      local ok, status = fs.writefile("test/res/image1.smaller.jpg", output_data)
-      assert(ok == true, status)
+      local output_data = arr.concat(output_chunks)
+      fs.writefile("test/res/image1.smaller.jpg", output_data)
 
     end)
 

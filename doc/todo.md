@@ -1,5 +1,7 @@
 # Now
 
+- Revise async tests in light of new santoku
+
 - Basic README
 - Documentation
 

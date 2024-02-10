@@ -1,4 +1,4 @@
-<% template:push(wasm) %>
+<% push(wasm) %>
 
 <% return var("VERSION") %> ?= 9e
 JPEG_URL = https://ijg.org/files/jpegsrc.v$(<% return var("VERSION") %>).tar.gz
@@ -19,7 +19,7 @@ $(JPEG_LIB): $(JPEG_ARCHIVE)
 $(JPEG_ARCHIVE):
 	curl -LsSo "$(JPEG_ARCHIVE)" "$(JPEG_URL)"
 
-<% template:pop():push(not wasm) %>
+<% pop() push(not wasm) %>
 
 <% return var("CFLAGS") %> ?=
 <% return var("LDFLAGS") %> ?= -ljpeg
@@ -29,4 +29,4 @@ results.mk: Makefile
 	echo "LIB_CFLAGS += $(<% return var("CFLAGS") %>)" >> results.mk
 	echo "LIB_LDFLAGS += $(<% return var("LDFLAGS") %>)" >> results.mk
 
-<% template:pop() %>
+<% pop() %>
