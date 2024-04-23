@@ -1,7 +1,7 @@
 local env = {
 
   name = "santoku-jpeg",
-  version = "0.0.18-1",
+  version = "0.0.19-1",
   variable_prefix = "TK_JPEG",
   license = "MIT",
   public = true,
